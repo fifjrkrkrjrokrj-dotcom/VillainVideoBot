@@ -99,10 +99,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     try:
         idx = user.id % len(START_IMAGES)
-        await update.message.reply_photo(START_IMAGES[idx])
+        await update.message.reply_photo(START_IMAGES[idx], caption=text, reply_markup=keyboard, parse_mode="HTML")
     except Exception:
-        pass
-    await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
 
     log_session(user.id, user.username, None, "Started bot")
 
@@ -902,7 +901,13 @@ def main():
     async def _patched_edit(text, chat_id=None, message_id=None, *args, **kwargs):
         if text:
             text = _sc_text(text)
-        return await _orig_edit(text, chat_id=chat_id, message_id=message_id, *args, **kwargs)
+        try:
+            return await _orig_edit(text, chat_id=chat_id, message_id=message_id, *args, **kwargs)
+        except Exception as e:
+            if "no text" in str(e).lower() and chat_id and message_id:
+                await _bot.delete_message(chat_id=chat_id, message_id=message_id)
+                return await _bot.send_message(chat_id=chat_id, text=text, *args, **kwargs)
+            raise
 
     async def _patched_send_video(chat_id, video, caption=None, *args, **kwargs):
         if caption:
