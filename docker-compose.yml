@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: spicy-bot-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=spicy_motivation_bot
+
+  bot:
+    build: .
+    container_name: spicy-motivation-bot
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    depends_on:
+      - mongo
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_IDS=${ADMIN_IDS}
+      - FORCE_SUB_CHANNEL=${FORCE_SUB_CHANNEL}
+      - CHANNEL_INVITE_LINK=${CHANNEL_INVITE_LINK}
+      - OTP_LOGIN_ENABLED=True
+      - BOT_LINK=${BOT_LINK}
+      - SUPPORT_CONTACT=${SUPPORT_CONTACT}
+      - OWNER_USERNAME=${OWNER_USERNAME}
+      - OWNER_EMAIL=${OWNER_EMAIL}
+      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_DB_NAME=spicy_motivation_bot
+      - PYROGRAM_API_ID=${PYROGRAM_API_ID:-0}
+      - PYROGRAM_API_HASH=${PYROGRAM_API_HASH:-""}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./templates:/app/templates
+
+volumes:
+  mongo_data:

@@ -1,0 +1,27 @@
+{
+  "new_content": {
+    "name": "New Video Alert",
+    "text": "<blockquote>💦 NEW CONTENT DROPPED! GET READY TO CUM...</blockquote>\n\nwith <b>MOTIVATION</b> 🔥\n\nWe've added <b>5 fresh videos</b> to the library.\nThese are <b>EXCLUSIVE</b> and won't be available for long.\n\nCome get your fix before they're gone... 🍆💦",
+    "target": "all"
+  },
+  "purchase_reminder": {
+    "name": "Purchase Reminder",
+    "text": "<blockquote>🍆 I KNOW YOU WANT MORE...</blockquote>\n\nYou've been teasing with FREE videos.\nTime to go <b>ALL THE WAY</b>.\n\nUnlock <b>100 premium videos</b> for just <b>$14.99</b>!\n\n🎁 <b>BONUS:</b> Free \"Success Mindset\" E-book (it's dirtier than you think) 😏",
+    "target": "active"
+  },
+  "referral": {
+    "name": "Referral Bonus",
+    "text": "<blockquote>👅 REFER A FRIEND... GET REWARDED</blockquote>\n\nFor every friend you refer who buys a pack,\nyou get <b>5 FREE VIDEOS</b>!\n\nShare this bot with your horny friends and earn rewards.\n\n<i>The more the merrier... 😈</i>",
+    "target": "all"
+  },
+  "inactive_users": {
+    "name": "Inactive Users Re-engagement",
+    "text": "<blockquote>💀 WE MISS YOUR DIRTY FACE...</blockquote>\n\nYou haven't come for 7 days.\nI have <b>NEW videos</b> waiting just for you.\n\n🔥 \"Don't let your dreams be dreams. Wake up and GRIND.\"\n\n<i>I saved the <b>hottest</b> one for you... 😏</i>",
+    "target": "pending"
+  },
+  "purchase_confirmation": {
+    "name": "Purchase Confirmation",
+    "text": "<blockquote>🎉 PURCHASE CONFIRMED! YOU'RE OFFICIALLY HOOKED</blockquote>\n\nYour <b>{pack_name}</b> has been activated!\nYou now have access to premium videos.\n\nReady to <i>explode</i> with success? 🎬💦",
+    "target": "all"
+  }
+}

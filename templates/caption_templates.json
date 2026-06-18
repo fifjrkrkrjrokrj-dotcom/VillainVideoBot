@@ -1,0 +1,26 @@
+{
+  "fitness": {
+    "template": "💪 <b>BEAST MODE ACTIVATED</b> 💪\n\nThis body is built with <b>HARD WORK</b>, not genetics.\n\n🔥 \"The pain you feel today will be the strength you feel tomorrow.\"\n\n⏳ Self-destructs in: <code>{delete_after}s</code>",
+    "emoji": "🏋️"
+  },
+  "business": {
+    "template": "💰 <b>MONEY DOESN'T SLEEP</b> 💰\n\nYou're watching this while someone else is GRINDING.\n\n🔥 \"Your future is created by what you do today, not tomorrow.\"\n\n⏳ Self-destructs in: <code>{delete_after}s</code>",
+    "emoji": "💰"
+  },
+  "mindset": {
+    "template": "🧠 <b>REWIRE YOUR BRAIN</b> 🧠\n\nYou are the average of the 5 people you surround yourself with.\n\n🔥 \"Become addicted to constant and never-ending self-improvement.\"\n\n⏳ Self-destructs in: <code>{delete_after}s</code>",
+    "emoji": "🧠"
+  },
+  "sports": {
+    "template": "🏆 <b>LEGENDS NEVER DIE</b> 🏆\n\n🔥 \"Champions keep playing until they get it right.\"\n\n⏳ Self-destructs in: <code>{delete_after}s</code>",
+    "emoji": "🏆"
+  },
+  "funny": {
+    "template": "😂 <b>LAUGH SO HARD</b> 😂\n\n🔥 \"Don't take life too seriously. No one gets out alive anyway.\"\n\n⏳ Self-destructs in: <code>{delete_after}s</code>",
+    "emoji": "😂"
+  },
+  "motivation": {
+    "template": "💦 <b>HARD WORK PAYS OFF</b> 💦\n\n🔥 \"Success is not for the weak. It's for those who GRIND when no one's watching.\" 🔥\n\n⏳ Self-destructs in: <code>{delete_after}s</code>",
+    "emoji": "🔥"
+  }
+}
