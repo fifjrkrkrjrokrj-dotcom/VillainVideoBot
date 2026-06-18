@@ -908,9 +908,9 @@ def main():
             caption = _sc_text(caption)
         return await _orig_send_video(chat_id, video, caption, *args, **kwargs)
 
-    _bot.send_message = _patched_send
-    _bot.edit_message_text = _patched_edit
-    _bot.send_video = _patched_send_video
+    object.__setattr__(_bot, "send_message", _patched_send)
+    object.__setattr__(_bot, "edit_message_text", _patched_edit)
+    object.__setattr__(_bot, "send_video", _patched_send_video)
     # ─────────────────────────────────────────────────────────────────────
 
     app.add_handler(CommandHandler("start", start))
