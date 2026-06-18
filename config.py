@@ -20,7 +20,9 @@ ADMIN_APPROVED_IDS = ADMIN_IDS
 PYROGRAM_API_ID = int(os.getenv("PYROGRAM_API_ID", "0"))
 PYROGRAM_API_HASH = os.getenv("PYROGRAM_API_HASH", "")
 
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+LOG_GROUP_ID = int(os.getenv("LOG_GROUP_ID", "0"))
+
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://xtradsbotmongo11223344:xtradsbotmongo11223344@cluster0.fvrafjl.mongodb.net/?appName=Cluster0")
 MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "spicy_motivation_bot")
 
 PURCHASE_OPTIONS = {

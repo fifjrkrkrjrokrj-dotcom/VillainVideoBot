@@ -836,7 +836,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def post_init(app: Application):
     logger.info("🔥 Spicy Motivation Bot v2 starting!")
-    db.init_db()
+    await db.init_db()
     logger.info("✅ Database initialized")
 
 
@@ -889,7 +889,6 @@ def main():
             TFA_WAIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_2fa)],
         },
         fallbacks=[CommandHandler("start", start)],
-        per_message=False,
     )
     app.add_handler(conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
