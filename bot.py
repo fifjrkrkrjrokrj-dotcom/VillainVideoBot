@@ -113,7 +113,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
 
     is_subbed = await check_subscription(context.bot, user.id)
-    if not is_subbed and data not in ("check_sub", "force_sub", "main_menu", "delete_session"):
+    if not is_subbed and data not in ("check_sub", "force_sub", "main_menu", "delete_session") and user.id not in config.ADMIN_IDS:
         sub = await db.get_subscription()
         if sub:
             await query.edit_message_text(

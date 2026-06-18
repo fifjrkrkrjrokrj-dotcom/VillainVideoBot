@@ -59,10 +59,10 @@ def danger(text, data=None, **kwargs):
     return styled_button(text, data, style="danger", **kwargs)
 
 def warning(text, data=None, **kwargs):
-    return styled_button(text, data, style=None, **kwargs)
+    return styled_button(text, data, style="danger", **kwargs)
 
 def info(text, data=None, **kwargs):
-    return styled_button(text, data, style=None, **kwargs)
+    return styled_button(text, data, style="primary", **kwargs)
 
 
 def make_keyboard(rows):
