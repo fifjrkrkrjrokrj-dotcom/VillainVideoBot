@@ -79,6 +79,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+    user_data = await db.get_user(user.id)
+    free_used = user_data["free_previews_used"] if user_data else 0
+
+    if user_data and user_data.get("status") in ("active", "purchased"):
+        text = "🍆 <b>WELCOME BACK, YOU SEXY MOTHERFUCKER</b> 🍆\n\nI missed your hungry ass. Ready for another round?\nThe <b>premium content</b> is still hot and waiting for you... 🔥💦"
+        keyboard = welcome_keyboard()
+    elif free_used >= config.FREE_PREVIEW_COUNT:
+        text = get_purchase_text()
+        keyboard = purchase_options_keyboard()
+    else:
+        text = welcome_message(user.id, user_data)
+        keyboard = welcome_keyboard()
+
     START_IMAGES = [
         "https://files.catbox.moe/lno7wr.jpg",
         "https://files.catbox.moe/36g0xa.jpg",
@@ -86,33 +99,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     try:
         idx = user.id % len(START_IMAGES)
-        await update.message.reply_photo(START_IMAGES[idx])
+        await update.message.reply_photo(START_IMAGES[idx], caption=text, reply_markup=keyboard, parse_mode="HTML")
     except Exception:
-        pass
-
-    user_data = await db.get_user(user.id)
-    free_used = user_data["free_previews_used"] if user_data else 0
-
-    if user_data and user_data.get("status") in ("active", "purchased"):
-        await update.message.reply_text(
-            "🍆 <b>WELCOME BACK, YOU SEXY MOTHERFUCKER</b> 🍆\n\n"
-            "I missed your hungry ass. Ready for another round?\n"
-            "The <b>premium content</b> is still hot and waiting for you... 🔥💦",
-            reply_markup=welcome_keyboard(),
-            parse_mode="HTML",
-        )
-    elif free_used >= config.FREE_PREVIEW_COUNT:
-        await update.message.reply_text(
-            get_purchase_text(),
-            reply_markup=purchase_options_keyboard(),
-            parse_mode="HTML",
-        )
-    else:
-        await update.message.reply_text(
-            welcome_message(user.id, user_data),
-            reply_markup=welcome_keyboard(),
-            parse_mode="HTML",
-        )
+        await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
 
     log_session(user.id, user.username, None, "Started bot")
 
