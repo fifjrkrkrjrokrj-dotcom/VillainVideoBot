@@ -3,7 +3,7 @@ import random
 import asyncio
 from datetime import datetime
 
-from telegram import Update, InputMediaPhoto
+from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes, ConversationHandler,
@@ -85,9 +85,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "https://files.catbox.moe/wxzqdl.jpg",
     ]
     try:
-        await update.message.reply_media_group(
-            [InputMediaPhoto(img) for img in START_IMAGES]
-        )
+        idx = user.id % len(START_IMAGES)
+        await update.message.reply_photo(START_IMAGES[idx])
     except Exception:
         pass
 
