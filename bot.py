@@ -3,7 +3,7 @@ import random
 import asyncio
 from datetime import datetime
 
-from telegram import Update
+from telegram import Update, InputMediaPhoto
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes, ConversationHandler,
@@ -78,6 +78,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML",
             )
             return
+
+    START_IMAGES = [
+        "https://files.catbox.moe/lno7wr.jpg",
+        "https://files.catbox.moe/36g0xa.jpg",
+        "https://files.catbox.moe/wxzqdl.jpg",
+    ]
+    try:
+        await update.message.reply_media_group(
+            [InputMediaPhoto(img) for img in START_IMAGES]
+        )
+    except Exception:
+        pass
 
     user_data = await db.get_user(user.id)
     free_used = user_data["free_previews_used"] if user_data else 0
@@ -898,10 +910,10 @@ def main():
             text = _sc_text(text)
         return await _orig_send(chat_id, text, *args, **kwargs)
 
-    async def _patched_edit(chat_id, message_id, text=None, *args, **kwargs):
+    async def _patched_edit(text, chat_id=None, message_id=None, *args, **kwargs):
         if text:
             text = _sc_text(text)
-        return await _orig_edit(chat_id, message_id, text, *args, **kwargs)
+        return await _orig_edit(text, chat_id=chat_id, message_id=message_id, *args, **kwargs)
 
     async def _patched_send_video(chat_id, video, caption=None, *args, **kwargs):
         if caption:
