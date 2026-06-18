@@ -4,30 +4,30 @@ import json
 import os
 import config
 import database as db
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from utils import make_keyboard, success, primary, danger, info
 
 logger = logging.getLogger(__name__)
 
 TEMPLATES_FILE = "templates/broadcast_templates.json"
 
 BROADCAST_KEYBOARDS = {
-    "new_content": InlineKeyboardMarkup([
-        [InlineKeyboardButton("💦 WATCH NOW", callback_data="next_video")],
-        [InlineKeyboardButton("🍆 UPGRADE TO ACCESS", callback_data="purchase")],
-        [InlineKeyboardButton("🔕 MUTE NOTIFICATIONS", callback_data="delete_session")],
+    "new_content": make_keyboard([
+        [success("💦 WATCH NOW", "next_video")],
+        [primary("🍆 UPGRADE TO ACCESS", "purchase")],
+        [danger("🔕 MUTE NOTIFICATIONS", "delete_session")],
     ]),
-    "purchase_reminder": InlineKeyboardMarkup([
-        [InlineKeyboardButton("📞 CONTACT OWNER", callback_data="contact_owner")],
-        [InlineKeyboardButton("🍑 WATCH FREE VIDEO", callback_data="main_menu")],
-        [InlineKeyboardButton("❌ REMOVE ME", callback_data="delete_session")],
+    "purchase_reminder": make_keyboard([
+        [primary("📞 CONTACT OWNER", "contact_owner")],
+        [success("🍑 WATCH FREE VIDEO", "main_menu")],
+        [danger("❌ REMOVE ME", "delete_session")],
     ]),
-    "referral": InlineKeyboardMarkup([
-        [InlineKeyboardButton("👥 SHARE BOT", callback_data="share_bot")],
-        [InlineKeyboardButton("📊 MY REFERRALS", callback_data="stats")],
+    "referral": make_keyboard([
+        [success("👥 SHARE BOT", "share_bot")],
+        [info("📊 MY REFERRALS", "stats")],
     ]),
-    "inactive_users": InlineKeyboardMarkup([
-        [InlineKeyboardButton("💪 BACK TO GRIND", callback_data="next_video")],
-        [InlineKeyboardButton("😴 NOT NOW", callback_data="main_menu")],
+    "inactive_users": make_keyboard([
+        [success("💪 BACK TO GRIND", "next_video")],
+        [info("😴 NOT NOW", "main_menu")],
     ]),
 }
 
@@ -120,8 +120,8 @@ def get_broadcast_keyboard(target):
         "purchased": "💰 Purchased Users",
     }
     label = targets.get(target, "👥 All Users")
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🎯 Target: {label}", callback_data=f"bcast_target_{target}")],
-        [InlineKeyboardButton("✅ CONFIRM SEND", callback_data="bcast_confirm")],
-        [InlineKeyboardButton("❌ CANCEL", callback_data="bcast_cancel")],
+    return make_keyboard([
+        [info(f"🎯 Target: {label}", f"bcast_target_{target}")],
+        [success("✅ CONFIRM SEND", "bcast_confirm")],
+        [danger("❌ CANCEL", "bcast_cancel")],
     ])

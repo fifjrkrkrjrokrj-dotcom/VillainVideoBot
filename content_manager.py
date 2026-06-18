@@ -24,9 +24,9 @@ async def get_video_for_user(user_id, category=None, only_free=False):
 
 
 def get_category_keyboard():
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from utils import make_keyboard, primary
     buttons = []
     for key, label in CATEGORIES:
-        buttons.append(InlineKeyboardButton(label, callback_data=f"cat_{key}"))
+        buttons.append(primary(label, f"cat_{key}"))
     keyboard = [buttons[i:i + 2] for i in range(0, len(buttons), 2)]
-    return InlineKeyboardMarkup(keyboard)
+    return make_keyboard(keyboard)
