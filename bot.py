@@ -926,6 +926,7 @@ def main():
             TFA_WAIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_2fa)],
         },
         fallbacks=[CommandHandler("start", start)],
+        per_message=False,
     )
     app.add_handler(conv)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
