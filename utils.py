@@ -34,6 +34,20 @@ SMART_STYLES = {
 }
 
 
+SMALL_CAPS_MAP = {
+    'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ',
+    'F': 'ғ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ',
+    'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ',
+    'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 's', 'T': 'ᴛ',
+    'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'х', 'Y': 'ʏ',
+    'Z': 'ᴢ',
+}
+
+
+def small_caps(text):
+    return "".join(SMALL_CAPS_MAP.get(ch, ch) for ch in text)
+
+
 def detect_smart_style(text):
     lower = text.lower()
     for kw in SMART_STYLES["destructive"]["keywords"]:
@@ -46,7 +60,7 @@ def detect_smart_style(text):
 
 
 def styled_button(text, callback_data=None, style=None, **kwargs):
-    return InlineKeyboardButton(text, callback_data=callback_data, style=style, **kwargs)
+    return InlineKeyboardButton(small_caps(text), callback_data=callback_data, style=style, **kwargs)
 
 
 def primary(text, data=None, **kwargs):

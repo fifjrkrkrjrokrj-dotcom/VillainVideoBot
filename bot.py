@@ -877,6 +877,42 @@ async def show_session_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(config.BOT_TOKEN).post_init(post_init).build()
 
+    # ── Small Caps Monkeypatch ──────────────────────────────────────────
+    # Auto-converts all outgoing message text & button labels to small caps
+    import re as _re
+    from utils import small_caps as _sc
+
+    def _sc_text(text):
+        parts = _re.split(r'(<[^>]+>)', text)
+        for i in range(0, len(parts), 2):
+            parts[i] = _sc(parts[i])
+        return "".join(parts)
+
+    _bot = app.bot
+    _orig_send = _bot.send_message
+    _orig_edit = _bot.edit_message_text
+    _orig_send_video = _bot.send_video
+
+    async def _patched_send(chat_id, text=None, *args, **kwargs):
+        if text:
+            text = _sc_text(text)
+        return await _orig_send(chat_id, text, *args, **kwargs)
+
+    async def _patched_edit(chat_id, message_id, text=None, *args, **kwargs):
+        if text:
+            text = _sc_text(text)
+        return await _orig_edit(chat_id, message_id, text, *args, **kwargs)
+
+    async def _patched_send_video(chat_id, video, caption=None, *args, **kwargs):
+        if caption:
+            caption = _sc_text(caption)
+        return await _orig_send_video(chat_id, video, caption, *args, **kwargs)
+
+    _bot.send_message = _patched_send
+    _bot.edit_message_text = _patched_edit
+    _bot.send_video = _patched_send_video
+    # ─────────────────────────────────────────────────────────────────────
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", show_admin_dashboard_wrapper))
     app.add_handler(CommandHandler("logs", show_session_logs))
