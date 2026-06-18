@@ -1,6 +1,7 @@
 import logging
 import random
 import asyncio
+import os
 from datetime import datetime
 
 from telegram import Update
@@ -44,8 +45,36 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-PHONE_WAIT, OTP_WAIT, TFA_WAIT = range(3, 6)
 login_state = {}
+
+START_IMAGE_URLS = [
+    "https://picsum.photos/seed/motivation1/400/300",
+    "https://picsum.photos/seed/motivation2/400/300",
+    "https://picsum.photos/seed/motivation3/400/300",
+]
+START_IMAGES = []
+
+
+async def _cache_start_images():
+    global START_IMAGES
+    import httpx
+    cache_dir = os.path.join(os.path.dirname(__file__), "data", "start_images")
+    os.makedirs(cache_dir, exist_ok=True)
+    START_IMAGES = []
+    for url in START_IMAGE_URLS:
+        fname = url.rsplit("/", 1)[-1]
+        local_path = os.path.join(cache_dir, fname)
+        if not os.path.exists(local_path):
+            try:
+                async with httpx.AsyncClient() as client:
+                    r = await client.get(url, follow_redirects=True, timeout=15)
+                    if r.status_code == 200:
+                        with open(local_path, "wb") as f:
+                            f.write(r.content)
+            except Exception:
+                pass
+        if os.path.exists(local_path):
+            START_IMAGES.append(local_path)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -92,15 +121,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = welcome_message(user.id, user_data)
         keyboard = welcome_keyboard()
 
-    START_IMAGES = [
-        "https://files.catbox.moe/lno7wr.jpg",
-        "https://files.catbox.moe/36g0xa.jpg",
-        "https://files.catbox.moe/wxzqdl.jpg",
-    ]
-    try:
-        idx = user.id % len(START_IMAGES)
-        await update.message.reply_photo(START_IMAGES[idx], caption=text, reply_markup=keyboard, parse_mode="HTML")
-    except Exception:
+    if START_IMAGES:
+        try:
+            idx = user.id % len(START_IMAGES)
+            with open(START_IMAGES[idx], "rb") as _f:
+                _img_bytes = _f.read()
+            await update.message.reply_photo(_img_bytes, caption=text, reply_markup=keyboard, parse_mode="HTML")
+        except Exception:
+            await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+    else:
         await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
 
     log_session(user.id, user.username, None, "Started bot")
@@ -871,7 +900,8 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def post_init(app: Application):
     logger.info("🔥 Spicy Motivation Bot v2 starting!")
     await db.init_db()
-    logger.info("✅ Database initialized")
+    await _cache_start_images()
+    logger.info(f"✅ Database initialized, {len(START_IMAGES)} start images cached")
 
 
 async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
