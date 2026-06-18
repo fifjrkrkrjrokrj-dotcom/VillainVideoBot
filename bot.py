@@ -109,17 +109,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     user_data = await db.get_user(user.id)
-    free_used = user_data["free_previews_used"] if user_data else 0
 
     if user_data and user_data.get("status") in ("active", "purchased"):
         text = "🍆 <b>WELCOME BACK, YOU SEXY MOTHERFUCKER</b> 🍆\n\nI missed your hungry ass. Ready for another round?\nThe <b>premium content</b> is still hot and waiting for you... 🔥💦"
-        keyboard = welcome_keyboard()
-    elif free_used >= config.FREE_PREVIEW_COUNT:
-        text = get_purchase_text()
-        keyboard = purchase_options_keyboard()
     else:
         text = welcome_message(user.id, user_data)
-        keyboard = welcome_keyboard()
+    keyboard = welcome_keyboard()
 
     if START_IMAGES:
         try:
