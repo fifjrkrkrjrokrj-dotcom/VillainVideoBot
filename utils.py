@@ -201,6 +201,7 @@ def purchase_options_keyboard():
             primary(f"🍆 {pack_info['label']} ({pack_info['price']})", f"purchase_{pack_key}")
         ])
     rows.append([info("🔙 BACK TO VIDEOS", "next_video")])
+    rows.append([danger("🏠 MAIN MENU", "main_menu")])
     return make_keyboard(rows)
 
 
