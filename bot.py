@@ -99,9 +99,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     try:
         idx = user.id % len(START_IMAGES)
-        await update.message.reply_photo(START_IMAGES[idx], caption=text, reply_markup=keyboard, parse_mode="HTML")
+        await update.message.reply_photo(START_IMAGES[idx])
     except Exception:
-        await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+        pass
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
 
     log_session(user.id, user.username, None, "Started bot")
 
