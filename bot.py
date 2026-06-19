@@ -60,7 +60,10 @@ async def _cache_start_videos():
     os.makedirs(cache_dir, exist_ok=True)
     START_VIDEOS = []
     
-    # We download welcome videos list defined in config
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+    
     urls = getattr(config, "START_VIDEO_URLS", [])
     for url in urls:
         fname = url.rsplit("/", 1)[-1]
@@ -68,36 +71,46 @@ async def _cache_start_videos():
         if not os.path.exists(local_path):
             try:
                 logger.info(f"Downloading start welcome video: {url}")
-                async with httpx.AsyncClient() as client:
-                    r = await client.get(url, follow_redirects=True, timeout=60)
+                async with httpx.AsyncClient(http2=False) as client:
+                    r = await client.get(url, headers=headers, follow_redirects=True, timeout=60)
                     if r.status_code == 200:
                         with open(local_path, "wb") as f:
                             f.write(r.content)
-            except Exception as e:
-                logger.error(f"Failed to download welcome video {url}: {e}")
+                        logger.info(f"Successfully downloaded start video: {local_path}")
+            except Exception as httpx_err:
+                logger.warning(f"httpx failed to download welcome video {url}: {httpx_err}. Trying urllib fallback.")
+                try:
+                    import urllib.request
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=60) as response:
+                        if response.status == 200:
+                            with open(local_path, "wb") as f:
+                                f.write(response.read())
+                            logger.info(f"Successfully downloaded start video via urllib: {local_path}")
+                except Exception as urllib_err:
+                    logger.error(f"Failed to download welcome video {url} with urllib as well: {urllib_err}")
         if os.path.exists(local_path):
             START_VIDEOS.append(local_path)
 
 async def send_welcome_media(chat, text, reply_markup, parse_mode="HTML"):
-    urls = getattr(config, "START_VIDEO_URLS", [])
-    if urls:
-        # Try a few random URLs from the list
-        shuffled_urls = list(urls)
-        random.shuffle(shuffled_urls)
-        for url in shuffled_urls:
-            try:
-                logger.info(f"Sending welcome video from URL: {url}")
+    global START_VIDEOS
+    # First priority: send locally cached welcome video
+    if START_VIDEOS:
+        video_path = random.choice(START_VIDEOS)
+        try:
+            logger.info(f"Sending welcome video from local cache: {video_path}")
+            with open(video_path, "rb") as f:
                 return await chat.send_video(
-                    video=url,
+                    video=f,
                     caption=text,
                     reply_markup=reply_markup,
                     parse_mode=parse_mode,
                     has_spoiler=True
                 )
-            except Exception as e:
-                logger.error(f"Failed to send welcome video from URL {url}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to send welcome video from local cache {video_path}: {e}")
 
-    # Fallback to local files if any
+    # Fallback to general start_video.mp4 if any
     if os.path.exists("data/start_video.mp4"):
         try:
             logger.info("Sending welcome video from local file: data/start_video.mp4")
@@ -111,6 +124,24 @@ async def send_welcome_media(chat, text, reply_markup, parse_mode="HTML"):
                 )
         except Exception as e:
             logger.error(f"Failed to send welcome video from local file: {e}")
+
+    # Fallback to direct URL sending if local cache is empty
+    urls = getattr(config, "START_VIDEO_URLS", [])
+    if urls:
+        shuffled_urls = list(urls)
+        random.shuffle(shuffled_urls)
+        for url in shuffled_urls:
+            try:
+                logger.info(f"Sending welcome video from URL fallback: {url}")
+                return await chat.send_video(
+                    video=url,
+                    caption=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                    has_spoiler=True
+                )
+            except Exception as e:
+                logger.error(f"Failed to send welcome video URL fallback {url}: {e}")
 
     # Fallback to standard text message
     return await chat.send_message(
@@ -1526,9 +1557,16 @@ async def handle_admin_callbacks(query, context, data):
     if data == "admin_videos":
         videos = await db.get_all_videos()
         text = f"<blockquote>📹 VIDEO MANAGEMENT ({len(videos)} Videos)</blockquote>\n\n"
-        for v in videos[:10]:
-            text += f"ID: <code>{v['id']}</code> | {v['category']} | Watched: {v['times_watched']}\n"
-        text += "\nUse the <b>Streamlit admin panel</b> for full management."
+        if not videos:
+            text += "No videos uploaded yet.\n"
+        else:
+            for v in videos[:10]:
+                text += f"ID: <code>{v['id']}</code> | {v['category']} | Watched: {v['times_watched']}\n"
+        text += (
+            "\n💡 <b>How to upload:</b> Send any video file directly to this bot in this chat. "
+            "You will get an interactive menu to configure the category, free/premium type, and deletion timer.\n\n"
+            "Use the <b>Streamlit admin panel</b> for advanced management."
+        )
         await query.edit_message_text(text, reply_markup=admin_keyboard(), parse_mode="HTML")
 
     elif data == "admin_purchases":
@@ -1908,6 +1946,8 @@ def main():
         try:
             return await _orig_edit(text, chat_id=chat_id, message_id=message_id, *args, **kwargs)
         except Exception as e:
+            if "Message is not modified" in str(e):
+                return
             logger.info(f"Patched edit failed: {e}. Falling back to delete and send.")
             if chat_id and message_id:
                 try:
