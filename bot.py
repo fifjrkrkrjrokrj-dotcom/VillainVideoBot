@@ -1982,34 +1982,78 @@ def main():
     _orig_edit = _bot.edit_message_text
     _orig_send_video = _bot.send_video
 
-    async def _patched_send(chat_id, text=None, *args, **kwargs):
-        if text:
-            text = _sc_text(text)
-        return await _orig_send(chat_id, text, *args, **kwargs)
+    from telegram import Bot
 
-    async def _patched_edit(text, chat_id=None, message_id=None, *args, **kwargs):
-        if text:
-            text = _sc_text(text)
+    async def _patched_send(*args, **kwargs):
+        if "text" in kwargs and kwargs["text"]:
+            kwargs["text"] = _sc_text(kwargs["text"])
+        else:
+            is_bound = len(args) > 0 and isinstance(args[0], Bot)
+            text_idx = 2 if is_bound else 1
+            if len(args) > text_idx and args[text_idx]:
+                args_list = list(args)
+                args_list[text_idx] = _sc_text(args_list[text_idx])
+                args = tuple(args_list)
+        return await _orig_send(*args, **kwargs)
+
+    async def _patched_edit(*args, **kwargs):
+        if "text" in kwargs and kwargs["text"]:
+            kwargs["text"] = _sc_text(kwargs["text"])
+        else:
+            is_bound = len(args) > 0 and isinstance(args[0], Bot)
+            text_idx = 1 if is_bound else 0
+            if len(args) > text_idx and args[text_idx]:
+                args_list = list(args)
+                args_list[text_idx] = _sc_text(args_list[text_idx])
+                args = tuple(args_list)
         try:
-            return await _orig_edit(text, chat_id=chat_id, message_id=message_id, *args, **kwargs)
+            return await _orig_edit(*args, **kwargs)
         except Exception as e:
             if "Message is not modified" in str(e):
                 return
             logger.info(f"Patched edit failed: {e}. Falling back to delete and send.")
-            if chat_id and message_id:
+            text_val = kwargs.get("text")
+            chat_id_val = kwargs.get("chat_id")
+            message_id_val = kwargs.get("message_id")
+            
+            is_bound = len(args) > 0 and isinstance(args[0], Bot)
+            if not text_val:
+                text_idx = 1 if is_bound else 0
+                if len(args) > text_idx:
+                    text_val = args[text_idx]
+            if not chat_id_val:
+                chat_idx = 2 if is_bound else 1
+                if len(args) > chat_idx:
+                    chat_id_val = args[chat_idx]
+            if not message_id_val:
+                msg_idx = 3 if is_bound else 2
+                if len(args) > msg_idx:
+                    message_id_val = args[msg_idx]
+                    
+            if text_val:
+                text_val = _sc_text(text_val)
+                
+            if chat_id_val and message_id_val:
                 try:
-                    await _bot.delete_message(chat_id=chat_id, message_id=message_id)
+                    await _bot.delete_message(chat_id=chat_id_val, message_id=message_id_val)
                 except Exception:
                     pass
                 reply_markup = kwargs.get("reply_markup")
                 parse_mode = kwargs.get("parse_mode", "HTML")
-                return await _bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
+                return await _bot.send_message(chat_id=chat_id_val, text=text_val, reply_markup=reply_markup, parse_mode=parse_mode)
             raise
 
-    async def _patched_send_video(chat_id, video, *args, **kwargs):
+    async def _patched_send_video(*args, **kwargs):
         if "caption" in kwargs and kwargs["caption"]:
             kwargs["caption"] = _sc_text(kwargs["caption"])
-        return await _orig_send_video(chat_id, video, *args, **kwargs)
+        else:
+            is_bound = len(args) > 0 and isinstance(args[0], Bot)
+            caption_idx = 4 if is_bound else 3
+            if len(args) > caption_idx and args[caption_idx]:
+                args_list = list(args)
+                args_list[caption_idx] = _sc_text(args_list[caption_idx])
+                args = tuple(args_list)
+        return await _orig_send_video(*args, **kwargs)
 
     object.__setattr__(_bot, "send_message", _patched_send)
     object.__setattr__(_bot, "edit_message_text", _patched_edit)
