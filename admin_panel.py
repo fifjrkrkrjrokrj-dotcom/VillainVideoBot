@@ -228,40 +228,96 @@ def show_video_management():
 
     with col2:
         st.markdown("### 📥 Add New Video")
-        with st.form("add_video_form"):
-            file_id = st.text_input("Video File ID", placeholder="Telegram file_id")
-            caption = st.text_area("Caption", placeholder="Leave blank for auto-generated")
+        upload_mode = st.radio("Upload Method", ["Telegram File ID", "Direct MP4 File Upload"])
+
+        if upload_mode == "Telegram File ID":
+            with st.form("add_video_form"):
+                file_id = st.text_input("Video File ID", placeholder="Telegram file_id")
+                caption = st.text_area("Caption", placeholder="Leave blank for auto-generated")
+                category = st.selectbox(
+                    "Category",
+                    ["motivation", "fitness", "business", "mindset", "sports", "funny"],
+                    index=0
+                )
+                delete_after = st.slider("Delete After (seconds)", 10, 300, 60)
+                is_free = st.checkbox("Free Video (unlocked for all)", value=True)
+
+                if st.form_submit_button("💾 SAVE VIDEO", type="primary", use_container_width=True):
+                    if file_id:
+                        counter = db.counters.find_one_and_update(
+                            {"_id": "video_id"},
+                            {"$inc": {"seq": 1}},
+                            return_document=True,
+                        )
+                        vid = counter["seq"]
+                        db.videos.insert_one({
+                            "id": vid,
+                            "file_id": file_id,
+                            "caption": caption if caption else None,
+                            "category": category,
+                            "delete_after": delete_after,
+                            "is_free": 1 if is_free else 0,
+                            "added_by": 0,
+                            "added_at": datetime.utcnow(),
+                            "times_watched": 0,
+                        })
+                        st.success(f"✅ Video #{vid} added to {category}!")
+                        st.rerun()
+                    else:
+                        st.error("❌ File ID is required.")
+        else:
+            uploaded_file = st.file_uploader("Upload Video File (.mp4)", type=["mp4"])
+            caption = st.text_area("Caption", placeholder="Leave blank for auto-generated", key="direct_caption")
             category = st.selectbox(
                 "Category",
                 ["motivation", "fitness", "business", "mindset", "sports", "funny"],
-                index=0
+                index=0,
+                key="direct_category"
             )
-            delete_after = st.slider("Delete After (seconds)", 10, 300, 60)
-            is_free = st.checkbox("Free Video (unlocked for all)", value=True)
+            delete_after = st.slider("Delete After (seconds)", 10, 300, 60, key="direct_delete")
+            is_free = st.checkbox("Free Video (unlocked for all)", value=True, key="direct_free")
 
-            if st.form_submit_button("🍆 UPLOAD & UNLOCK", type="primary", use_container_width=True):
-                if file_id:
-                    counter = db.counters.find_one_and_update(
-                        {"_id": "video_id"},
-                        {"$inc": {"seq": 1}},
-                        return_document=True,
-                    )
-                    vid = counter["seq"]
-                    db.videos.insert_one({
-                        "id": vid,
-                        "file_id": file_id,
-                        "caption": caption if caption else None,
-                        "category": category,
-                        "delete_after": delete_after,
-                        "is_free": 1 if is_free else 0,
-                        "added_by": 0,
-                        "added_at": datetime.utcnow(),
-                        "times_watched": 0,
-                    })
-                    st.success(f"✅ Video #{vid} added to {category}!")
-                    st.rerun()
+            if st.button("🍆 UPLOAD & SAVE", type="primary", use_container_width=True):
+                if uploaded_file is not None:
+                    with st.spinner("Uploading to Telegram..."):
+                        import requests
+                        # Send to the first admin ID or log group ID
+                        chat_id = config.LOG_GROUP_ID if config.LOG_GROUP_ID != 0 else config.ADMIN_IDS[0]
+                        url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendVideo"
+                        files = {"video": (uploaded_file.name, uploaded_file.getvalue(), "video/mp4")}
+                        data = {"chat_id": chat_id, "caption": "Uploaded via Streamlit Admin Panel"}
+                        try:
+                            response = requests.post(url, files=files, data=data, timeout=120)
+                            if response.status_code == 200 and response.json().get("ok"):
+                                res_json = response.json()
+                                file_id = res_json["result"]["video"]["file_id"]
+
+                                counter = db.counters.find_one_and_update(
+                                    {"_id": "video_id"},
+                                    {"$inc": {"seq": 1}},
+                                    return_document=True,
+                                )
+                                vid = counter["seq"]
+                                db.videos.insert_one({
+                                    "id": vid,
+                                    "file_id": file_id,
+                                    "caption": caption if caption else None,
+                                    "category": category,
+                                    "delete_after": delete_after,
+                                    "is_free": 1 if is_free else 0,
+                                    "added_by": 0,
+                                    "added_at": datetime.utcnow(),
+                                    "times_watched": 0,
+                                })
+                                st.success(f"✅ Video #{vid} uploaded and saved to {category} successfully!")
+                                st.rerun()
+                            else:
+                                err = response.json().get("description") if response.status_code == 200 else response.text
+                                st.error(f"❌ Telegram upload failed: {err}")
+                        except Exception as e:
+                            st.error(f"❌ Error uploading video: {e}")
                 else:
-                    st.error("❌ File ID is required.")
+                    st.error("❌ Please select a video file first.")
 
     with col1:
         videos = list(db.videos.find().sort("added_at", -1))
@@ -572,13 +628,51 @@ def show_session_logs():
 
 
 def show_settings():
-    st.markdown("## ⚙️ SETTINGS")
+    st.markdown("## ⚙️ GLOBAL SETTINGS")
     db = get_db()
-
+    
+    settings = db.settings.find_one({"_id": "global_config"}) or {}
+    
     col1, col2 = st.columns(2)
-
+    
     with col1:
-        st.markdown("### Bot Configuration")
+        st.markdown("### ⚙️ Update Configs")
+        with st.form("settings_form"):
+            force_sub = st.text_input("Force Join Channel", value=settings.get("force_sub_channel", ""))
+            force_link = st.text_input("Force Join Invite Link", value=settings.get("channel_invite_link", ""))
+            log_group = st.number_input("Log Group ID", value=int(settings.get("log_group_id", 0)), step=1)
+            brand_name = st.text_input("Branding Name", value=settings.get("branding_name", "Spicy Motivation Bot"))
+            brand_days = st.number_input("Branding Days", value=int(settings.get("branding_days", 30)), min_value=1)
+            upi = st.text_input("UPI ID", value=settings.get("upi_id", ""))
+            usdt = st.text_input("USDT Address", value=settings.get("usdt_address", ""))
+            ton = st.text_input("TON Address", value=settings.get("ton_address", ""))
+            auto_join = st.text_input("Auto-Join Channel/Link", value=settings.get("auto_join_channel", ""))
+            commission = st.number_input("Commission %", value=int(settings.get("commission", 10)), min_value=0, max_value=100)
+            maint_mode = st.checkbox("Maintenance Mode Enabled", value=bool(settings.get("maintenance_mode", False)))
+            
+            if st.form_submit_button("💾 SAVE SETTINGS", type="primary", use_container_width=True):
+                db.settings.update_one(
+                    {"_id": "global_config"},
+                    {"$set": {
+                        "force_sub_channel": force_sub,
+                        "channel_invite_link": force_link,
+                        "log_group_id": int(log_group),
+                        "branding_name": brand_name,
+                        "branding_days": int(brand_days),
+                        "upi_id": upi,
+                        "usdt_address": usdt,
+                        "ton_address": ton,
+                        "auto_join_channel": auto_join,
+                        "commission": int(commission),
+                        "maintenance_mode": maint_mode,
+                    }},
+                    upsert=True
+                )
+                st.success("✅ Settings updated successfully!")
+                st.rerun()
+                
+    with col2:
+        st.markdown("### 📋 Current Bot Settings")
         st.markdown(f"""
         - **Token:** `{config.BOT_TOKEN[:10]}...{config.BOT_TOKEN[-5:]}` (hidden)
         - **Admin IDs:** `{config.ADMIN_IDS}`
@@ -588,17 +682,11 @@ def show_settings():
         - **Owner:** `{config.OWNER_USERNAME}`
         - **Bot Link:** `{config.BOT_LINK}`
         """)
-
-    with col2:
-        st.markdown("### Purchase Options")
-        for key, info in config.PURCHASE_OPTIONS.items():
-            st.markdown(f"- **{info['label']}:** {info['price']}")
-
-        st.markdown("### MongoDB Info")
+        
+        st.markdown("### 🗄️ MongoDB Database Info")
         st.markdown(f"""
         - **URI:** `{config.MONGODB_URI}`
         - **Database:** `{config.MONGODB_DB_NAME}`
-        - **Collections:** users, videos, purchases, broadcasts, subscriptions, activity_log, referral_log
         """)
 
     st.divider()

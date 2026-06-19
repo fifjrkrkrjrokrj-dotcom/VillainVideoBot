@@ -37,6 +37,23 @@ async def init_db():
             "added_on": datetime.utcnow(),
         })
 
+    existing_settings = await db.settings.find_one({"_id": "global_config"})
+    if not existing_settings:
+        await db.settings.insert_one({
+            "_id": "global_config",
+            "force_sub_channel": config.FORCE_SUB_CHANNEL,
+            "channel_invite_link": config.CHANNEL_INVITE_LINK,
+            "log_group_id": config.LOG_GROUP_ID,
+            "branding_name": "Spicy Motivation Bot",
+            "branding_days": 30,
+            "upi_id": "",
+            "usdt_address": "",
+            "ton_address": "",
+            "maintenance_mode": False,
+            "admin_ids": config.ADMIN_IDS,
+            "auto_join_channel": "",
+        })
+
     await db.users.create_index("user_id", unique=True)
     await db.videos.create_index("id", unique=True)
     await db.purchases.create_index("id", unique=True)
@@ -73,6 +90,9 @@ async def add_user(user_id, username, first_name):
             "pack_expiry": None,
             "free_previews_used": 0,
             "last_video_id": None,
+            "language": None,
+            "agreement_accepted": False,
+            "session_string": None,
             "last_active": datetime.utcnow(),
             "joined_at": datetime.utcnow(),
         })
@@ -307,3 +327,32 @@ async def save_broadcast_template(name, text, target="all"):
 async def get_broadcast_templates():
     cursor = db.broadcast_templates.find()
     return await cursor.to_list(length=None)
+
+
+async def get_settings():
+    s = await db.settings.find_one({"_id": "global_config"})
+    if not s:
+        s = {
+            "_id": "global_config",
+            "force_sub_channel": config.FORCE_SUB_CHANNEL,
+            "channel_invite_link": config.CHANNEL_INVITE_LINK,
+            "log_group_id": config.LOG_GROUP_ID,
+            "branding_name": "Spicy Motivation Bot",
+            "branding_days": 30,
+            "upi_id": "",
+            "usdt_address": "",
+            "ton_address": "",
+            "maintenance_mode": False,
+            "admin_ids": config.ADMIN_IDS,
+            "auto_join_channel": "",
+        }
+        await db.settings.insert_one(s)
+    return s
+
+
+async def update_settings(**kwargs):
+    await db.settings.update_one(
+        {"_id": "global_config"},
+        {"$set": kwargs},
+        upsert=True
+    )

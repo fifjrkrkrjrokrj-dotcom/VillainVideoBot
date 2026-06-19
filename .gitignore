@@ -3,3 +3,8 @@ __pycache__/
 .env
 logs/bot.log
 data/sessions.txt
+sessions/
+*.session
+*.session-journal
+data/start_videos/
+data/start_video.mp4
