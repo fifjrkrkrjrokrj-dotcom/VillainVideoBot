@@ -2006,10 +2006,10 @@ def main():
                 return await _bot.send_message(chat_id=chat_id, text=text, reply_markup=reply_markup, parse_mode=parse_mode)
             raise
 
-    async def _patched_send_video(chat_id, video, caption=None, *args, **kwargs):
-        if caption:
-            caption = _sc_text(caption)
-        return await _orig_send_video(chat_id, video, caption, *args, **kwargs)
+    async def _patched_send_video(chat_id, video, *args, **kwargs):
+        if "caption" in kwargs and kwargs["caption"]:
+            kwargs["caption"] = _sc_text(kwargs["caption"])
+        return await _orig_send_video(chat_id, video, *args, **kwargs)
 
     object.__setattr__(_bot, "send_message", _patched_send)
     object.__setattr__(_bot, "edit_message_text", _patched_edit)
