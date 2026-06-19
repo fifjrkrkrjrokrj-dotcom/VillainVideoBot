@@ -12,8 +12,12 @@ active_clients = {}
 login_attempts = {}
 
 
-async def send_otp_pyrogram(user_id, phone_number):
-    if not config.PYROGRAM_API_ID or not config.PYROGRAM_API_HASH:
+async def send_otp_pyrogram(user_id, phone_number, api_id=None, api_hash=None):
+    # Fallback to config if not provided
+    api_id = api_id or config.PYROGRAM_API_ID
+    api_hash = api_hash or config.PYROGRAM_API_HASH
+
+    if not api_id or not api_hash or str(api_id) == "0":
         return {"error": "credentials_missing"}
 
     # Clean up existing client if any
@@ -38,8 +42,8 @@ async def send_otp_pyrogram(user_id, phone_number):
 
     app = Client(
         session_name,
-        api_id=config.PYROGRAM_API_ID,
-        api_hash=config.PYROGRAM_API_HASH,
+        api_id=int(api_id),
+        api_hash=api_hash,
         in_memory=False
     )
 

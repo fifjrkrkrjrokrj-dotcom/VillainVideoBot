@@ -282,6 +282,7 @@ def telegram_admin_panel_keyboard(maintenance_active=False):
         [danger("🏦 Set UPI ID", "adm_upi"), danger("🪙 Set USDT", "adm_usdt"), danger("💎 Set TON", "adm_ton")],
         [primary("👥 Join All", "adm_join_all"), primary("🔗 Auto-Joins", "adm_auto_joins"), primary("👤 User Manage", "adm_user_manage")],
         [success("📊 Set Commission", "adm_commission"), maint_btn],
+        [primary("🔑 Set API ID", "adm_api_id"), primary("🔑 Set API HASH", "adm_api_hash")],
         [danger("👥 Manage Admins", "adm_admins"), danger("🔙 Back to Menu", "admin_dashboard")]
     ])
 

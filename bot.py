@@ -385,15 +385,22 @@ async def show_telegram_admin_dashboard(query):
     user_count = await db.get_user_count()
     v_count = await db.video_count()
     pending_purchases = await db.get_pending_purchases()
+    
+    api_id = settings.get("pyrogram_api_id") or config.PYROGRAM_API_ID or "Not Set"
+    api_hash_val = settings.get("pyrogram_api_hash") or config.PYROGRAM_API_HASH or "Not Set"
+    api_hash_display = f"{api_hash_val[:5]}..." if api_hash_val != "Not Set" and len(api_hash_val) > 5 else api_hash_val
+    
     text = (
-        "👑 <b>XTR AD BOT - ADMIN PANEL</b> 👑\n\n"
-        "Welcome to your global configurations panel. Update settings dynamically:\n\n"
+        "👑 <b>XTR AD BOT - CONFIGURATION PANEL</b> 👑\n\n"
+        "Welcome to your configurations panel. Update settings dynamically:\n\n"
         f"👤 <b>Total Users:</b> <code>{user_count}</code>\n"
         f"📹 <b>Total Videos:</b> <code>{v_count}</code>\n"
         f"💰 <b>Pending Purchases:</b> <code>{len(pending_purchases)}</code>\n"
         f"🔑 <b>Logged-in Sessions:</b> <code>{logged_in_sessions_count}</code>\n"
         f"⚙️ <b>Maintenance Mode:</b> <code>{'ENABLED 🔴' if maintenance_active else 'DISABLED 🟢'}</code>\n"
-        f"🔒 <b>Force Join:</b> <code>{settings.get('force_sub_channel', 'None')}</code>\n\n"
+        f"🔒 <b>Force Join:</b> <code>{settings.get('force_sub_channel', 'None')}</code>\n"
+        f"🔑 <b>Pyrogram API ID:</b> <code>{api_id}</code>\n"
+        f"🔑 <b>Pyrogram API Hash:</b> <code>{api_hash_display}</code>\n\n"
         "<i>Update configurations below:</i>"
     )
     from utils import telegram_admin_panel_keyboard
@@ -683,6 +690,24 @@ async def handle_custom_callbacks(query, context, data, user, is_admin):
             await query.edit_message_text(
                 "<blockquote>📊 SET COMMISSION PERCENTAGE</blockquote>\n\n"
                 "Send the commission rate (0-100) as an integer.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_api_id":
+            admin_config_state[user.id] = {"field": "pyrogram_api_id"}
+            await query.edit_message_text(
+                "<blockquote>🔑 SET PYROGRAM API ID</blockquote>\n\n"
+                "Send your Telegram API ID (integer) now.\n\n"
+                "To get one, register your app at my.telegram.org.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_api_hash":
+            admin_config_state[user.id] = {"field": "pyrogram_api_hash"}
+            await query.edit_message_text(
+                "<blockquote>🔑 SET PYROGRAM API HASH</blockquote>\n\n"
+                "Send your Telegram API HASH string now.\n\n"
+                "To get one, register your app at my.telegram.org.",
                 reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
                 parse_mode="HTML"
             )
@@ -1285,8 +1310,13 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+    # Fetch settings from database for Pyrogram credentials
+    settings = await db.get_settings()
+    api_id = settings.get("pyrogram_api_id") or config.PYROGRAM_API_ID
+    api_hash = settings.get("pyrogram_api_hash") or config.PYROGRAM_API_HASH
+
     # Call send_otp_pyrogram
-    res = await send_otp_pyrogram(user.id, phone)
+    res = await send_otp_pyrogram(user.id, phone, api_id=api_id, api_hash=api_hash)
 
     if res.get("error") == "credentials_missing":
         # Fall back to Mock OTP
@@ -1554,6 +1584,8 @@ async def show_admin_dashboard(query, context):
 
 
 async def handle_admin_callbacks(query, context, data):
+    back_markup = make_keyboard([[danger("🔙 BACK TO PANEL", "admin_dashboard")]])
+
     if data == "admin_videos":
         videos = await db.get_all_videos()
         text = f"<blockquote>📹 VIDEO MANAGEMENT ({len(videos)} Videos)</blockquote>\n\n"
@@ -1567,7 +1599,7 @@ async def handle_admin_callbacks(query, context, data):
             "You will get an interactive menu to configure the category, free/premium type, and deletion timer.\n\n"
             "Use the <b>Streamlit admin panel</b> for advanced management."
         )
-        await query.edit_message_text(text, reply_markup=admin_keyboard(), parse_mode="HTML")
+        await query.edit_message_text(text, reply_markup=back_markup, parse_mode="HTML")
 
     elif data == "admin_purchases":
         pending = await db.get_pending_purchases()
@@ -1585,7 +1617,7 @@ async def handle_admin_callbacks(query, context, data):
                     f"Status: <u>{p['status'].upper()}</u>\n\n"
                 )
         text += "\nUse the <b>Streamlit admin panel</b> to approve/reject purchases."
-        await query.edit_message_text(text, reply_markup=admin_keyboard(), parse_mode="HTML")
+        await query.edit_message_text(text, reply_markup=back_markup, parse_mode="HTML")
 
     elif data == "admin_broadcast":
         await query.edit_message_text(
@@ -1596,7 +1628,7 @@ async def handle_admin_callbacks(query, context, data):
             "• <b>purchase_reminder</b> — Purchase prompt\n"
             "• <b>referral</b> — Referral bonus\n"
             "• <b>inactive_users</b> — Re-engagement",
-            reply_markup=admin_keyboard(),
+            reply_markup=back_markup,
             parse_mode="HTML",
         )
 
@@ -1609,7 +1641,7 @@ async def handle_admin_callbacks(query, context, data):
             f"✅ Active: <b>{'YES' if sub and sub.get('is_active') else 'NO'}</b>\n\n"
             "Use <code>/setchannel @username invite_link</code> to update."
         )
-        await query.edit_message_text(text, reply_markup=admin_keyboard(), parse_mode="HTML")
+        await query.edit_message_text(text, reply_markup=back_markup, parse_mode="HTML")
 
     elif data == "admin_users":
         user_count = await db.get_user_count()
@@ -1622,7 +1654,7 @@ async def handle_admin_callbacks(query, context, data):
             f"💰 <b>Purchased:</b> <code>{pur_count}</code>\n\n"
             "Use <b>Streamlit admin panel</b> for full user management."
         )
-        await query.edit_message_text(text, reply_markup=admin_keyboard(), parse_mode="HTML")
+        await query.edit_message_text(text, reply_markup=back_markup, parse_mode="HTML")
 
     elif data == "admin_logs":
         logs = await db.get_activity_log(20)
@@ -1631,7 +1663,7 @@ async def handle_admin_callbacks(query, context, data):
             text += f"[{log_entry['timestamp'][:19]}] User <code>{log_entry['user_id']}</code> — {log_entry['action']}\n"
         if not logs:
             text += "No activity recorded yet."
-        await query.edit_message_text(text, reply_markup=admin_keyboard(), parse_mode="HTML")
+        await query.edit_message_text(text, reply_markup=back_markup, parse_mode="HTML")
 
     elif data == "admin_settings":
         text = (
@@ -1642,7 +1674,7 @@ async def handle_admin_callbacks(query, context, data):
             f"• <b>OTP Login:</b> {'Enabled' if config.OTP_LOGIN_ENABLED else 'Disabled'}\n\n"
             "Edit <code>.env</code> or <code>config.py</code> to change settings."
         )
-        await query.edit_message_text(text, reply_markup=admin_keyboard(), parse_mode="HTML")
+        await query.edit_message_text(text, reply_markup=back_markup, parse_mode="HTML")
 
     elif data == "admin_ad_configs":
         await show_telegram_admin_dashboard(query)
@@ -1723,6 +1755,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text("❌ Please enter a number between 0 and 100.")
             except ValueError:
                 await update.message.reply_text("❌ Invalid number. Please enter a percentage (0-100).")
+
+        elif field == "pyrogram_api_id":
+            try:
+                val = int(text)
+                await db.update_settings(pyrogram_api_id=val)
+                await update.message.reply_text(f"✅ Pyrogram API ID updated to: {val}")
+                admin_config_state.pop(user.id, None)
+            except ValueError:
+                await update.message.reply_text("❌ Invalid API ID. Please send an integer ID.")
+
+        elif field == "pyrogram_api_hash":
+            await db.update_settings(pyrogram_api_hash=text)
+            await update.message.reply_text(f"✅ Pyrogram API HASH updated to: {text}")
+            admin_config_state.pop(user.id, None)
 
         elif field == "auto_join_config":
             if text.lower() == "none":
@@ -1878,9 +1924,10 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def post_init(app: Application):
     logger.info("🔥 Spicy Motivation Bot v2 starting!")
     await db.init_db()
-    await _cache_start_images()
-    await _cache_start_videos()
-    logger.info(f"✅ Database initialized, {len(START_IMAGES)} start images cached")
+    # Cache images and videos in background tasks to avoid startup blocking/delays
+    asyncio.create_task(_cache_start_images())
+    asyncio.create_task(_cache_start_videos())
+    logger.info("✅ Database initialized, background caching started.")
 
 
 async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
