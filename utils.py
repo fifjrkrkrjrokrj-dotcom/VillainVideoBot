@@ -269,6 +269,7 @@ def admin_keyboard():
         [info("👥 USERS", "admin_users")],
         [info("📋 SESSION LOGS", "admin_logs")],
         [danger("⚙️ SETTINGS", "admin_settings")],
+        [success("👑 AD BOT CONFIGS", "admin_ad_configs")],
     ])
 
 
@@ -281,7 +282,7 @@ def telegram_admin_panel_keyboard(maintenance_active=False):
         [danger("🏦 Set UPI ID", "adm_upi"), danger("🪙 Set USDT", "adm_usdt"), danger("💎 Set TON", "adm_ton")],
         [primary("👥 Join All", "adm_join_all"), primary("🔗 Auto-Joins", "adm_auto_joins"), primary("👤 User Manage", "adm_user_manage")],
         [success("📊 Set Commission", "adm_commission"), maint_btn],
-        [danger("👥 Manage Admins", "adm_admins"), danger("🔙 Back to Menu", "main_menu")]
+        [danger("👥 Manage Admins", "adm_admins"), danger("🔙 Back to Menu", "admin_dashboard")]
     ])
 
 

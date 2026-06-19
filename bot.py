@@ -79,25 +79,39 @@ async def _cache_start_videos():
             START_VIDEOS.append(local_path)
 
 async def send_welcome_media(chat, text, reply_markup, parse_mode="HTML"):
-    global START_VIDEOS
-    video_path = None
-    if START_VIDEOS:
-        video_path = random.choice(START_VIDEOS)
-    elif os.path.exists("data/start_video.mp4"):
-        video_path = "data/start_video.mp4"
-        
-    if video_path:
+    urls = getattr(config, "START_VIDEO_URLS", [])
+    if urls:
+        # Try a few random URLs from the list
+        shuffled_urls = list(urls)
+        random.shuffle(shuffled_urls)
+        for url in shuffled_urls:
+            try:
+                logger.info(f"Sending welcome video from URL: {url}")
+                return await chat.send_video(
+                    video=url,
+                    caption=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                    has_spoiler=True
+                )
+            except Exception as e:
+                logger.error(f"Failed to send welcome video from URL {url}: {e}")
+
+    # Fallback to local files if any
+    if os.path.exists("data/start_video.mp4"):
         try:
-            with open(video_path, "rb") as f:
+            logger.info("Sending welcome video from local file: data/start_video.mp4")
+            with open("data/start_video.mp4", "rb") as f:
                 return await chat.send_video(
                     video=f,
                     caption=text,
                     reply_markup=reply_markup,
-                    parse_mode=parse_mode
+                    parse_mode=parse_mode,
+                    has_spoiler=True
                 )
         except Exception as e:
-            logger.error(f"Failed to send welcome video {video_path}: {e}")
-            
+            logger.error(f"Failed to send welcome video from local file: {e}")
+
     # Fallback to standard text message
     return await chat.send_message(
         text=text,
@@ -941,7 +955,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "admin_dashboard":
         if not is_admin:
             return
-        await show_telegram_admin_dashboard(query)
+        await show_admin_dashboard(query, context)
     elif data.startswith("admin_"):
         if not is_admin:
             return
@@ -1132,13 +1146,13 @@ async def handle_next_video(query, context, user, user_data, lang="en"):
         pass
 
 
-async def handle_purchase_request(query, user, pack_key):
+async def handle_purchase_request(query, user, pack_key, lang="en"):
     purchase_id, error = await request_purchase(user.id, pack_key)
     if error:
         await query.edit_message_text(
             f"<blockquote>❌ {error}</blockquote>",
             reply_markup=make_keyboard([
-                [primary("🔙 BACK", "main_menu")]
+                [primary(get_text("BACK_BTN", lang), "main_menu")]
             ]),
             parse_mode="HTML",
         )
@@ -1165,9 +1179,9 @@ async def handle_purchase_request(query, user, pack_key):
     )
 
 
-async def handle_stats(query, user, user_data):
+async def handle_stats(query, user, user_data, lang="en"):
     if not user_data:
-        await query.edit_message_text("❌ No data found.", reply_markup=main_menu_keyboard())
+        await query.edit_message_text("❌ No data found.", reply_markup=main_menu_keyboard(lang))
         return
 
     leaderboard = await db.get_leaderboard(10)
@@ -1175,26 +1189,28 @@ async def handle_stats(query, user, user_data):
     for i, u in enumerate(leaderboard, 1):
         horny_emoji = "🍆" if u["video_count"] > 10 else "🔥"
         lb_lines.append(f"{i}. @{u['username'] or 'Anonymous'} — {u['video_count']} videos {horny_emoji}")
-    lb_text = "\n".join(lb_lines) if lb_lines else "No data yet."
+    lb_text = "\n".join(lb_lines) if lb_lines else ("No data yet." if lang == "en" else "अभी कोई डेटा नहीं है।")
 
     status_text = {
-        "active": "✅ VERIFIED & HORNY",
-        "purchased": "💎 PREMIUM ADDICT",
-        "pending": "❌ VIRGIN (not verified)"
+        "active": get_text("STATUS_ACTIVE", lang),
+        "purchased": get_text("STATUS_PURCHASED", lang),
+        "pending": get_text("STATUS_PENDING", lang)
     }
-    status_label = status_text.get(user_data.get("status", "pending"), "❌ PENDING")
+    status_label = status_text.get(user_data.get("status", "pending"), get_text("STATUS_PENDING", lang))
+    pack_label = user_data.get('purchased_pack') or ("Free (cheapskate)" if lang == "en" else "मुफ़्त उपयोगकर्ता")
 
-    text = (
-        "<blockquote>📊 YOUR ADDICTION LEVEL</blockquote>\n\n"
-        f"👤 User: @{user.username or 'N/A'}\n"
-        f"🔞 Status: <b>{status_label}</b>\n"
-        f"📹 Videos Watched: <b>{user_data['video_count']}</b> 🍆🔥\n"
-        f"⏱️ Total Time Spent: <b>{user_data['total_watch_time'] // 60}</b> min\n"
-        f"💰 Pack: <b>{user_data.get('purchased_pack') or 'Free (cheapskate)'}</b>\n"
-        f"🎁 Referrals: <b>{user_data['referral_count']}</b>\n\n"
-        f"<u>🏆 GLOBAL LEADERBOARD 🏆</u>\n{lb_text}"
+    text = get_text(
+        "STATS_TEXT",
+        lang,
+        user.username or 'N/A',
+        status_label,
+        user_data['video_count'],
+        user_data['total_watch_time'] // 60,
+        pack_label,
+        user_data['referral_count'],
+        lb_text
     )
-    await query.edit_message_text(text, reply_markup=stats_keyboard(), parse_mode="HTML")
+    await query.edit_message_text(text, reply_markup=stats_keyboard(lang), parse_mode="HTML")
 
 
 async def handle_login_success_msg(message, user, user_data, lang="en"):
@@ -1590,6 +1606,9 @@ async def handle_admin_callbacks(query, context, data):
         )
         await query.edit_message_text(text, reply_markup=admin_keyboard(), parse_mode="HTML")
 
+    elif data == "admin_ad_configs":
+        await show_telegram_admin_dashboard(query)
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -1929,30 +1948,22 @@ async def show_admin_dashboard_wrapper(update: Update, context: ContextTypes.DEF
     is_admin = await is_user_admin(user.id)
     if not is_admin:
         return
-    settings = await db.get_settings()
-    maintenance_active = settings.get("maintenance_mode", False)
-    logged_in_sessions_count = await db.db.users.count_documents({"session_string": {"$ne": None}})
     user_count = await db.get_user_count()
     v_count = await db.video_count()
     pending_purchases = await db.get_pending_purchases()
-    
-    force_sub = settings.get("force_sub_channel", "None") or "None"
-    
+    total_logs = len(await db.get_activity_log(100))
+
     text = (
-        "👑 <b>XTR AD BOT - ADMIN PANEL</b> 👑\n\n"
-        "Welcome to your global configurations panel. Update settings dynamically:\n\n"
-        f"👤 <b>Total Users:</b> <code>{user_count}</code>\n"
+        "<blockquote>🔞 ADMIN CONTROL PANEL</blockquote>\n\n"
+        f"👥 <b>Total Users:</b> <code>{user_count}</code>\n"
         f"📹 <b>Total Videos:</b> <code>{v_count}</code>\n"
         f"💰 <b>Pending Purchases:</b> <code>{len(pending_purchases)}</code>\n"
-        f"🔑 <b>Logged-in Sessions:</b> <code>{logged_in_sessions_count}</code>\n"
-        f"⚙️ <b>Maintenance Mode:</b> <code>{'ENABLED 🔴' if maintenance_active else 'DISABLED 🟢'}</code>\n"
-        f"🔒 <b>Force Join:</b> <code>{force_sub}</code>\n\n"
-        "<i>Update configurations below:</i>"
+        f"📋 <b>Activity Logs:</b> <code>{total_logs}</code>\n\n"
+        "<i>Select a section below to manage.</i>"
     )
-    from utils import telegram_admin_panel_keyboard
     await update.message.reply_text(
         text,
-        reply_markup=telegram_admin_panel_keyboard(maintenance_active),
+        reply_markup=admin_keyboard(),
         parse_mode="HTML"
     )
 

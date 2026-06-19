@@ -46,8 +46,7 @@ def get_contact_owner_text(user_id):
     return (
         "<blockquote>📞 TALK DIRTY TO THE OWNER</blockquote>\n\n"
         "Wanna buy the full experience? Slide into the owner's DMs:\n\n"
-        f"👤 <b>Owner:</b> {config.OWNER_USERNAME}\n"
-        f"📧 <b>Email:</b> {config.OWNER_EMAIL}\n\n"
+        f"👤 <b>Owner:</b> {config.OWNER_USERNAME}\n\n"
         "Tell him what you <b>really</b> want:\n"
         f"• Your User ID: <code>{user_id}</code>\n"
         "• Which pack got you <i>wet</i> 🍆\n"
