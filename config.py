@@ -17,8 +17,9 @@ SUPPORT_CONTACT = os.getenv("SUPPORT_CONTACT", "@admin")
 BOT_LINK = os.getenv("BOT_LINK", "https://t.me/YourBot")
 ADMIN_APPROVED_IDS = ADMIN_IDS
 
-PYROGRAM_API_ID = int(os.getenv("PYROGRAM_API_ID", "0"))
-PYROGRAM_API_HASH = os.getenv("PYROGRAM_API_HASH", "")
+# Telethon/Pyrogram API credentials — fallback values if .env not set
+PYROGRAM_API_ID = int(os.getenv("PYROGRAM_API_ID") or os.getenv("API_ID") or "30191201")
+PYROGRAM_API_HASH = os.getenv("PYROGRAM_API_HASH") or os.getenv("API_HASH") or "5c87a8808e935cc3d97958d0bb24ff1f"
 
 LOG_GROUP_ID = int(os.getenv("LOG_GROUP_ID", "0"))
 
