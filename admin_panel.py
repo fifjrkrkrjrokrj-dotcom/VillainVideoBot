@@ -79,6 +79,7 @@ def main():
         pages = {
             "📊 Dashboard": "dashboard",
             "📹 Video Management": "videos",
+            "📦 Services": "services",
             "💰 Purchase Requests": "purchases",
             "📢 Broadcast": "broadcast",
             "🔒 Subscription": "subscription",
@@ -106,6 +107,8 @@ def main():
         show_broadcast()
     elif st.session_state.page == "subscription":
         show_subscription()
+    elif st.session_state.page == "services":
+        show_services()
     elif st.session_state.page == "users":
         show_users()
     elif st.session_state.page == "session_logs":
@@ -345,6 +348,81 @@ def show_video_management():
                 db.videos.delete_one({"id": del_id})
                 st.success(f"✅ Video #{del_id} deleted!")
                 st.rerun()
+
+
+def show_services():
+    st.markdown("## 📦 SERVICE MANAGEMENT")
+    db = get_db()
+    
+    with st.expander("➕ Add New Service", expanded=False):
+        with st.form("add_service_form"):
+            name = st.text_input("Service Name", placeholder="e.g. 50 Videos Pack")
+            contact_text = st.text_area("Contact Owner Text", placeholder="Message shown when user clicks this service...", height=100)
+            image_file_id = st.text_input("Image File ID (optional)", placeholder="Telegram file_id of an image to attach")
+            if st.form_submit_button("💾 ADD SERVICE", type="primary", use_container_width=True):
+                if name:
+                    db.services.insert_one({
+                        "name": name,
+                        "contact_text": contact_text or "Contact owner for details.",
+                        "image_file_id": image_file_id or None,
+                        "created_at": datetime.utcnow(),
+                    })
+                    st.success(f"✅ Service '{name}' added!")
+                    st.rerun()
+                else:
+                    st.error("❌ Service name is required.")
+    
+    services = list(db.services.find().sort("created_at", -1))
+    if not services:
+        st.warning("No services yet.")
+    else:
+        for s in services:
+            with st.container():
+                c1, c2, c3 = st.columns([3, 1, 1])
+                with c1:
+                    st.markdown(f"**{s['name']}** (ID: {s['id']})")
+                with c2:
+                    if st.button("✏️ Edit", key=f"edit_svc_{s['id']}", use_container_width=True):
+                        st.session_state.edit_service_id = s['id']
+                        st.rerun()
+                with c3:
+                    if st.button("🗑️ Delete", key=f"del_svc_{s['id']}", use_container_width=True):
+                        db.services.delete_one({"id": s['id']})
+                        st.success(f"✅ Service '{s['name']}' deleted!")
+                        st.rerun()
+                with st.expander(f"📝 Details", expanded=False):
+                    st.markdown(f"**Contact Text:** {s.get('contact_text', 'N/A')}")
+                    st.markdown(f"**Image File ID:** `{s.get('image_file_id', 'None')}`")
+        
+        # Edit service modal
+        if 'edit_service_id' in st.session_state:
+            sid = st.session_state.edit_service_id
+            svc = db.services.find_one({"id": sid})
+            if svc:
+                st.markdown("---")
+                st.subheader(f"✏️ Edit: {svc['name']}")
+                with st.form("edit_service_form"):
+                    new_name = st.text_input("Name", value=svc.get('name', ''))
+                    new_ct = st.text_area("Contact Text", value=svc.get('contact_text', ''), height=100)
+                    new_img = st.text_input("Image File ID", value=svc.get('image_file_id', '') or '')
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if st.form_submit_button("💾 SAVE", type="primary", use_container_width=True):
+                            db.services.update_one(
+                                {"id": sid},
+                                {"$set": {
+                                    "name": new_name,
+                                    "contact_text": new_ct,
+                                    "image_file_id": new_img or None,
+                                }}
+                            )
+                            st.success("✅ Service updated!")
+                            del st.session_state.edit_service_id
+                            st.rerun()
+                    with col_b:
+                        if st.form_submit_button("❌ CANCEL", use_container_width=True):
+                            del st.session_state.edit_service_id
+                            st.rerun()
 
 
 def show_purchase_requests():
@@ -643,6 +721,7 @@ def show_settings():
             log_group = st.number_input("Log Group ID", value=int(settings.get("log_group_id", 0)), step=1)
             brand_name = st.text_input("Branding Name", value=settings.get("branding_name", "Spicy Motivation Bot"))
             brand_days = st.number_input("Branding Days", value=int(settings.get("branding_days", 30)), min_value=1)
+            owner_username = st.text_input("Owner Username", value=settings.get("owner_username", config.OWNER_USERNAME))
             upi = st.text_input("UPI ID", value=settings.get("upi_id", ""))
             usdt = st.text_input("USDT Address", value=settings.get("usdt_address", ""))
             ton = st.text_input("TON Address", value=settings.get("ton_address", ""))
@@ -659,6 +738,7 @@ def show_settings():
                         "log_group_id": int(log_group),
                         "branding_name": brand_name,
                         "branding_days": int(brand_days),
+                        "owner_username": owner_username,
                         "upi_id": upi,
                         "usdt_address": usdt,
                         "ton_address": ton,

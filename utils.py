@@ -276,6 +276,7 @@ def admin_keyboard():
 def telegram_admin_panel_keyboard(maintenance_active=False):
     maint_btn = danger("🔴 Disable Maintenance", "adm_toggle_maint") if maintenance_active else success("🟢 Enable Maintenance", "adm_toggle_maint")
     return make_keyboard([
+        [primary("👤 Set Owner", "adm_owner_username"), primary("📦 Services", "adm_services")],
         [danger("📅 Sub Plans", "adm_sub_plans"), danger("🔗 Set Force Join", "adm_force_join")],
         [primary("📁 Set Log Group", "adm_log_group"), primary("🏷️ Set Branding Name", "adm_brand_name")],
         [success("⏰ Set Branding Days", "adm_brand_days"), success("🖼️ Set Menu Images", "adm_menu_images")],

