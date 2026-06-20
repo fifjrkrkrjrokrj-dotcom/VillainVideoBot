@@ -358,16 +358,47 @@ def show_services():
         with st.form("add_service_form"):
             name = st.text_input("Service Name", placeholder="e.g. 50 Videos Pack")
             contact_text = st.text_area("Contact Owner Text", placeholder="Message shown when user clicks this service...", height=100)
-            image_file_id = st.text_input("Image File ID (optional)", placeholder="Telegram file_id of an image to attach")
+            uploaded_image = st.file_uploader("Upload Image File", type=["png", "jpg", "jpeg"])
+            image_file_id = st.text_input("Image File ID (optional / fallback)", placeholder="Telegram file_id of an image to attach")
             if st.form_submit_button("💾 ADD SERVICE", type="primary", use_container_width=True):
                 if name:
+                    final_img_id = image_file_id if image_file_id else None
+                    if uploaded_image is not None:
+                        with st.spinner("Uploading image to Telegram..."):
+                            import requests
+                            chat_id = config.LOG_GROUP_ID if config.LOG_GROUP_ID != 0 else config.ADMIN_IDS[0]
+                            url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendPhoto"
+                            files = {"photo": (uploaded_image.name, uploaded_image.getvalue(), "image/jpeg")}
+                            data = {"chat_id": chat_id, "caption": f"Service Image Upload: {name}"}
+                            try:
+                                response = requests.post(url, files=files, data=data, timeout=30)
+                                if response.status_code == 200 and response.json().get("ok"):
+                                    res_json = response.json()
+                                    final_img_id = res_json["result"]["photo"][-1]["file_id"]
+                                else:
+                                    err = response.json().get("description") if response.status_code == 200 else response.text
+                                    st.error(f"❌ Telegram upload failed: {err}")
+                                    st.stop()
+                            except Exception as e:
+                                st.error(f"❌ Error uploading image: {e}")
+                                st.stop()
+                    
+                    counter = db.counters.find_one_and_update(
+                        {"_id": "service_id"},
+                        {"$inc": {"seq": 1}},
+                        upsert=True,
+                        return_document=pymongo.ReturnDocument.AFTER
+                    )
+                    sid = counter["seq"]
+                    
                     db.services.insert_one({
+                        "id": sid,
                         "name": name,
                         "contact_text": contact_text or "Contact owner for details.",
-                        "image_file_id": image_file_id or None,
+                        "image_file_id": final_img_id,
                         "created_at": datetime.utcnow(),
                     })
-                    st.success(f"✅ Service '{name}' added!")
+                    st.success(f"✅ Service '{name}' added! (ID: {sid})")
                     st.rerun()
                 else:
                     st.error("❌ Service name is required.")
@@ -404,16 +435,38 @@ def show_services():
                 with st.form("edit_service_form"):
                     new_name = st.text_input("Name", value=svc.get('name', ''))
                     new_ct = st.text_area("Contact Text", value=svc.get('contact_text', ''), height=100)
+                    uploaded_edit_image = st.file_uploader("Upload New Image File", type=["png", "jpg", "jpeg"])
                     new_img = st.text_input("Image File ID", value=svc.get('image_file_id', '') or '')
                     col_a, col_b = st.columns(2)
                     with col_a:
                         if st.form_submit_button("💾 SAVE", type="primary", use_container_width=True):
+                            final_new_img = new_img if new_img else None
+                            if uploaded_edit_image is not None:
+                                with st.spinner("Uploading new image to Telegram..."):
+                                    import requests
+                                    chat_id = config.LOG_GROUP_ID if config.LOG_GROUP_ID != 0 else config.ADMIN_IDS[0]
+                                    url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/sendPhoto"
+                                    files = {"photo": (uploaded_edit_image.name, uploaded_edit_image.getvalue(), "image/jpeg")}
+                                    data = {"chat_id": chat_id, "caption": f"Service Image Edit: {new_name}"}
+                                    try:
+                                        response = requests.post(url, files=files, data=data, timeout=30)
+                                        if response.status_code == 200 and response.json().get("ok"):
+                                            res_json = response.json()
+                                            final_new_img = res_json["result"]["photo"][-1]["file_id"]
+                                        else:
+                                            err = response.json().get("description") if response.status_code == 200 else response.text
+                                            st.error(f"❌ Telegram upload failed: {err}")
+                                            st.stop()
+                                    except Exception as e:
+                                        st.error(f"❌ Error uploading image: {e}")
+                                        st.stop()
+                            
                             db.services.update_one(
                                 {"id": sid},
                                 {"$set": {
                                     "name": new_name,
                                     "contact_text": new_ct,
-                                    "image_file_id": new_img or None,
+                                    "image_file_id": final_new_img,
                                 }}
                             )
                             st.success("✅ Service updated!")

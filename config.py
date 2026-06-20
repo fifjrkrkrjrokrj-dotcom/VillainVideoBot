@@ -31,7 +31,7 @@ PURCHASE_OPTIONS = {
     "unlimited": {"label": "Unlimited (Monthly)", "price": "$24.99"},
 }
 
-OWNER_USERNAME = os.getenv("OWNER_USERNAME", "@YourOwnerUsername")
+OWNER_USERNAME = os.getenv("OWNER_USERNAME", "@Katillll")
 REVEAL_ENABLED = True
 
 START_VIDEO_URLS = [

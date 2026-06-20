@@ -84,7 +84,8 @@ def process_file(filepath):
         (r'(?<!f)(?<!F)"[^"]*"', False),   # double-quoted, not f-string
     ]:
         pattern, is_fstring = pattern_data
-        for m in list(re.finditer(pattern, content)):
+        matches = list(re.finditer(pattern, content))
+        for m in reversed(matches):
             orig = m.group(0)
             inner = orig[1:-1]  # strip quotes
             if should_skip_string(inner):
@@ -99,7 +100,7 @@ def process_file(filepath):
     # Strategy: find single-quoted strings NOT inside braces
     # We use a simpler approach: process the whole file char by char
     # to find strings that are in display context
-    for m in list(re.finditer(r"'[^']*'", content)):
+    for m in reversed(list(re.finditer(r"'[^']*'", content))):
         # Check context: is this inside {} (f-string expression)?
         pos = m.start()
         before = content[:pos]

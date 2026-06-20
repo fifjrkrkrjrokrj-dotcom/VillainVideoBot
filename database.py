@@ -57,8 +57,11 @@ async def init_db():
             "maintenance_mode": False,
             "admin_ids": config.ADMIN_IDS,
             "auto_join_channel": "",
-            "owner_username": config.OWNER_USERNAME,
+            "owner_username": "@Katillll",
         })
+    else:
+        if existing_settings.get("owner_username") == "@YourOwnerUsername" or not existing_settings.get("owner_username"):
+            await db.settings.update_one({"_id": "global_config"}, {"$set": {"owner_username": "@Katillll"}})
 
     await db.users.create_index("user_id", unique=True)
     await db.videos.create_index("id", unique=True)

