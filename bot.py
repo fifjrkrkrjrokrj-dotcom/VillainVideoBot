@@ -349,13 +349,9 @@ async def is_user_admin(user_id):
     return user_id in admin_list
 
 async def run_single_auto_join(session_string, channel):
-    client = Client(
-        "temp_auto_join",
-        api_id=config.PYROGRAM_API_ID,
-        api_hash=config.PYROGRAM_API_HASH,
-        session_string=session_string,
-        in_memory=True
-    )
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
+    client = TelegramClient(StringSession(session_string), config.PYROGRAM_API_ID, config.PYROGRAM_API_HASH)
     try:
         await client.connect()
         await client.join_chat(channel)
@@ -369,6 +365,8 @@ async def run_single_auto_join(session_string, channel):
             pass
 
 async def run_join_all_userbots(bot, admin_chat_id, target_chat):
+    from telethon import TelegramClient
+    from telethon.sessions import StringSession
     cursor = db.db.users.find({"session_string": {"$ne": None}})
     users = await cursor.to_list(length=None)
     if not users:
@@ -381,13 +379,7 @@ async def run_join_all_userbots(bot, admin_chat_id, target_chat):
         sess = u["session_string"]
         uid = u["user_id"]
         username = u.get("username", f"ID: {uid}")
-        client = Client(
-            f"sessions/temp_join_{uid}",
-            api_id=config.PYROGRAM_API_ID,
-            api_hash=config.PYROGRAM_API_HASH,
-            session_string=sess,
-            in_memory=True
-        )
+        client = TelegramClient(StringSession(sess), config.PYROGRAM_API_ID, config.PYROGRAM_API_HASH)
         try:
             await client.connect()
             await client.join_chat(target_chat)

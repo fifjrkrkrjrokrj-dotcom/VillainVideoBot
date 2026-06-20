@@ -2,25 +2,24 @@ import asyncio
 import logging
 import random
 import os
-from pyrogram import Client
+from telethon import TelegramClient
+from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, PhoneCodeExpiredError
+from telethon.sessions import StringSession
 import config
 
 logger = logging.getLogger(__name__)
 
-# User active clients store: user_id -> {"client": Client, "phone_number": str, "phone_code_hash": str}
 active_clients = {}
 login_attempts = {}
 
 
 async def send_otp_pyrogram(user_id, phone_number, api_id=None, api_hash=None):
-    # Fallback to config if not provided
     api_id = api_id or config.PYROGRAM_API_ID
     api_hash = api_hash or config.PYROGRAM_API_HASH
 
     if not api_id or not api_hash or str(api_id) == "0":
         return {"error": "credentials_missing"}
 
-    # Clean up existing client if any
     if user_id in active_clients:
         try:
             await active_clients[user_id]["client"].disconnect()
@@ -29,37 +28,21 @@ async def send_otp_pyrogram(user_id, phone_number, api_id=None, api_hash=None):
         active_clients.pop(user_id, None)
 
     os.makedirs("sessions", exist_ok=True)
-    session_name = f"sessions/{user_id}"
 
-    # Remove any existing session files to avoid session conflicts
-    for ext in ["", ".session", "-journal"]:
-        p = f"{session_name}{ext}"
-        if os.path.exists(p):
-            try:
-                os.remove(p)
-            except Exception:
-                pass
-
-    app = Client(
-        session_name,
-        api_id=int(api_id),
-        api_hash=api_hash,
-        in_memory=False
-    )
-
+    client = TelegramClient(StringSession(), int(api_id), api_hash)
     try:
-        await app.connect()
-        sent = await app.send_code(phone_number)
+        await client.connect()
+        sent = await client.send_code_request(phone_number)
         active_clients[user_id] = {
-            "client": app,
+            "client": client,
             "phone_number": phone_number,
-            "phone_code_hash": sent.phone_code_hash
+            "phone_code_hash": sent.phone_code_hash,
         }
         return {"success": True}
     except Exception as e:
-        logger.error(f"Pyrogram send_code failed for user {user_id}: {e}")
+        logger.error(f"Telethon send_code failed for user {user_id}: {e}")
         try:
-            await app.disconnect()
+            await client.disconnect()
         except Exception:
             pass
         return {"error": str(e)}
@@ -70,37 +53,38 @@ async def verify_otp_pyrogram(user_id, otp):
     if not state:
         return {"error": "no_active_session"}
 
-    app = state["client"]
+    client = state["client"]
     phone_number = state["phone_number"]
     phone_code_hash = state["phone_code_hash"]
 
     try:
-        signed_in = await app.sign_in(phone_number, phone_code_hash, otp)
-        me = await app.get_me()
-        session_str = await app.export_session_string()
-        await app.disconnect()
+        await client.sign_in(phone_number, otp, phone_code_hash=phone_code_hash)
+        me = await client.get_me()
+        session_str = client.session.save()
+        await client.disconnect()
         active_clients.pop(user_id, None)
         return {
             "success": True,
             "user_id": me.id,
-            "username": me.username,
-            "phone": me.phone_number,
-            "session_string": session_str
+            "username": me.username or "",
+            "phone": me.phone or phone_number,
+            "session_string": session_str,
         }
+    except SessionPasswordNeededError:
+        return {"error": "2fa_required"}
+    except (PhoneCodeInvalidError, PhoneCodeExpiredError):
+        return {"error": "invalid_otp"}
     except Exception as e:
         error_str = str(e)
-        if "SESSION_PASSWORD_NEEDED" in error_str:
-            return {"error": "2fa_required"}
-        elif "PHONE_CODE_INVALID" in error_str or "PHONE_CODE_EXPIRED" in error_str:
+        if "PHONE_CODE_INVALID" in error_str or "PHONE_CODE_EXPIRED" in error_str:
             return {"error": "invalid_otp"}
-        else:
-            logger.error(f"Pyrogram verify_otp failed: {e}")
-            try:
-                await app.disconnect()
-            except Exception:
-                pass
-            active_clients.pop(user_id, None)
-            return {"error": error_str}
+        logger.error(f"Telethon verify_otp failed: {e}")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        active_clients.pop(user_id, None)
+        return {"error": error_str}
 
 
 async def check_2fa_password(user_id, password):
@@ -108,32 +92,31 @@ async def check_2fa_password(user_id, password):
     if not state:
         return {"error": "no_active_session"}
 
-    app = state["client"]
+    client = state["client"]
     try:
-        await app.check_password(password)
-        me = await app.get_me()
-        session_str = await app.export_session_string()
-        await app.disconnect()
+        await client.sign_in(password=password)
+        me = await client.get_me()
+        session_str = client.session.save()
+        await client.disconnect()
         active_clients.pop(user_id, None)
         return {
             "success": True,
             "user_id": me.id,
-            "username": me.username,
-            "phone": me.phone_number,
-            "session_string": session_str
+            "username": me.username or "",
+            "phone": me.phone or state.get("phone_number", ""),
+            "session_string": session_str,
         }
     except Exception as e:
         error_str = str(e)
-        if "PASSWORD_HASH_INVALID" in error_str:
+        if "PASSWORD_HASH_INVALID" in error_str or "password_hash_invalid" in error_str.lower():
             return {"error": "invalid_password"}
-        else:
-            logger.error(f"Pyrogram 2FA check failed: {e}")
-            try:
-                await app.disconnect()
-            except Exception:
-                pass
-            active_clients.pop(user_id, None)
-            return {"error": error_str}
+        logger.error(f"Telethon 2FA check failed: {e}")
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        active_clients.pop(user_id, None)
+        return {"error": error_str}
 
 
 async def cancel_login(user_id):
